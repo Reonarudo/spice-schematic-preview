@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-01, pre-release)
 
 First version, ported from the VS Code extension
 [spice-schematic-preview](https://github.com/Reonarudo/spice-markdown-preview) 0.4.0.
