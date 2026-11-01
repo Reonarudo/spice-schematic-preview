@@ -1,0 +1,169 @@
+/* SPICE Schematic Preview. Ported from spice-markdown-preview's media/preview.css, with VS Code's
+   theme variables replaced by Obsidian's. */
+
+/* Scale a wide schematic down to the column instead of letting it overflow. Schematics are black
+   line art; in a light theme, or with "Follow dark themes" off, they sit on a white card with their
+   exact colours, whose padding and rounding make it read as a deliberate figure. */
+svg.spice {
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+/* "Follow dark themes" (on by default): like Mermaid, the drawing sits on the page in dark-theme
+   colours. Every colour in it is `light-dark(<original>, <dark>)` (src/theme.ts); the drawing's
+   colour scheme picks one, so switching themes needs no re-render. */
+svg.spice {
+  color-scheme: light;
+}
+
+body.theme-dark.spice-follow-dark svg.spice {
+  background: none;
+  color-scheme: dark;
+}
+
+.spice-figure {
+  margin: 1em 0;
+}
+
+.spice-figure figcaption {
+  margin-top: .5em;
+  color: var(--text-muted);
+}
+
+.spice-align-left {
+  text-align: left;
+}
+
+.spice-align-center {
+  text-align: center;
+}
+
+.spice-align-right {
+  text-align: right;
+}
+
+.spice-error {
+  border-inline-start: 3px solid var(--text-warning, #b58900);
+  padding: .5em 1em;
+  margin: 1em 0;
+}
+
+.spice-error pre {
+  white-space: pre-wrap;
+  margin: 0;
+  background: none;
+  padding: 0;
+}
+
+.spice-loading {
+  margin: 1em 0;
+  padding: .5em 1em;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ---- The view toggle. ----
+   Reading view: a button dressed as Obsidian's own "Edit this block" button (the one Mermaid and
+   every rendered code block get in Live Preview): same corner, size, colours and hover fade.
+   Live Preview: hidden, and the block always shows its schematic; Obsidian's button opens the
+   fence for editing, exactly as for Mermaid. */
+
+.spice-fence {
+  position: relative;
+}
+
+/* Keep the button's corner clear, so it never sits on a schematic. */
+.spice-fence > .spice-rendering {
+  padding-inline-end: 36px;
+}
+
+.spice-fence > pre {
+  display: none;
+}
+
+.spice-fence[data-view="source"] > .spice-rendering {
+  display: none;
+}
+
+.spice-fence[data-view="source"] > pre {
+  display: block;
+  margin: 0;
+  padding-inline-end: 44px;
+  overflow-x: auto;
+}
+
+.spice-fence > .spice-toggle {
+  position: absolute;
+  inset-block-start: var(--size-2-2, 4px);
+  inset-inline-end: var(--size-2-2, 4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  padding: var(--size-2-2, 4px) var(--size-2-3, 6px);
+  border: none;
+  border-radius: var(--clickable-icon-radius, 8px);
+  background: transparent;
+  box-shadow: none;
+  color: var(--icon-color);
+  cursor: var(--cursor, pointer);
+  opacity: 0;
+  transition: opacity 0.07s ease-out;
+  z-index: 1;
+}
+
+.spice-fence:hover > .spice-toggle,
+.spice-fence > .spice-toggle:focus-visible {
+  opacity: 1;
+}
+
+.spice-fence > .spice-toggle:hover {
+  background: var(--background-modifier-hover);
+  color: var(--icon-color-hover, var(--icon-color));
+}
+
+.spice-fence > .spice-toggle:focus-visible {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus, var(--interactive-accent));
+}
+
+.spice-toggle svg {
+  width: var(--icon-size, 16px);
+  height: var(--icon-size, 16px);
+  stroke-width: var(--icon-stroke, 2px);
+}
+
+/* The glyph names the view the click leads to. */
+.spice-toggle .spice-icon-graph {
+  display: none;
+}
+
+.spice-fence[data-view="source"] .spice-toggle .spice-icon-code {
+  display: none;
+}
+
+.spice-fence[data-view="source"] .spice-toggle .spice-icon-graph {
+  display: inline;
+}
+
+/* Live Preview: Obsidian's own button is the control, and a flip made in Reading view does not
+   apply; the corner is left to Obsidian. */
+.markdown-source-view .spice-fence > .spice-toggle {
+  display: none;
+}
+
+.markdown-source-view .spice-fence[data-view="source"] > .spice-rendering {
+  display: block;
+}
+
+.markdown-source-view .spice-fence[data-view="source"] > pre {
+  display: none;
+}
+
+.markdown-source-view .spice-fence > .spice-rendering {
+  padding-inline-end: 0;
+}

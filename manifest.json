@@ -1,0 +1,10 @@
+{
+  "id": "spice-schematic-preview",
+  "name": "SPICE Schematic Preview",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Draw SPICE netlists in spice code blocks as circuit schematics, with a button to flip each one between the schematic and its source.",
+  "author": "Leonardo Marques",
+  "authorUrl": "https://github.com/Reonarudo",
+  "isDesktopOnly": true
+}
