@@ -30,3 +30,7 @@ Desktop only: yes. Minimum Obsidian version: 1.5.0.
 ## Not yet verified
 
 - On real phones (iOS, Android) through BRAT: not applicable, the plugin is desktop-only.
+
+## Promotion
+
+2026-11-01: promoted from pre-release to release, same tag and the same assets (no rebuild).
