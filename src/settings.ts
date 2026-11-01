@@ -1,4 +1,4 @@
-import { PluginSettingTab, Setting, type App, type SettingDefinitionItem } from 'obsidian';
+import { PluginSettingTab, type App, type SettingDefinitionItem } from 'obsidian';
 import { DEFAULT_DIALECT, DIALECT_NAMES } from '#renderer/dist/dialect.js';
 import type SpicePlugin from './main';
 
@@ -42,7 +42,7 @@ export function readSettings(stored: unknown): Settings {
   };
 }
 
-/** Names and descriptions, shared by both ways of drawing the tab. */
+/** Names and descriptions of the settings. */
 const LABELS = {
   dialect: {
     name: 'Dialect',
@@ -78,7 +78,7 @@ export class SpiceSettingTab extends PluginSettingTab {
     super(app, plugin);
   }
 
-  /** Obsidian 1.13 and later: the settings as definitions, so they appear in settings search. */
+  /** The settings as definitions: Obsidian draws them, and lists them in settings search. */
   getSettingDefinitions(): SettingDefinitionItem[] {
     return [
       { ...LABELS.dialect, control: { type: 'dropdown', key: 'dialect', options: DIALECT_OPTIONS, defaultValue: DEFAULT_SETTINGS.dialect } },
@@ -97,46 +97,5 @@ export class SpiceSettingTab extends PluginSettingTab {
     if (!(key in DEFAULT_SETTINGS)) return;
     const next = readSettings({ ...this.plugin.settings, [key]: value });
     await this.plugin.updateSettings({ [key]: next[key as keyof Settings] });
-  }
-
-  /** Obsidian before 1.13 draws the tab from here. */
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-    const settings = this.plugin.settings;
-
-    new Setting(containerEl)
-      .setName(LABELS.dialect.name)
-      .setDesc(LABELS.dialect.desc)
-      .addDropdown((dropdown) => dropdown
-        .addOptions(DIALECT_OPTIONS)
-        .setValue(settings.dialect)
-        .onChange(async (value) => this.plugin.updateSettings({ dialect: value })));
-
-    new Setting(containerEl)
-      .setName(LABELS.layoutTimeout.name)
-      .setDesc(LABELS.layoutTimeout.desc)
-      .addText((text) => text
-        .setPlaceholder(String(DEFAULT_SETTINGS.layoutTimeout))
-        .setValue(String(settings.layoutTimeout))
-        .onChange(async (raw) => {
-          const seconds = Number(raw);
-          if (checkTimeout(seconds) !== undefined) return;
-          await this.plugin.updateSettings({ layoutTimeout: seconds });
-        }));
-
-    new Setting(containerEl)
-      .setName(LABELS.followDarkTheme.name)
-      .setDesc(LABELS.followDarkTheme.desc)
-      .addToggle((toggle) => toggle
-        .setValue(settings.followDarkTheme)
-        .onChange(async (value) => this.plugin.updateSettings({ followDarkTheme: value })));
-
-    new Setting(containerEl)
-      .setName(LABELS.debug.name)
-      .setDesc(LABELS.debug.desc)
-      .addToggle((toggle) => toggle
-        .setValue(settings.debug)
-        .onChange(async (value) => this.plugin.updateSettings({ debug: value })));
   }
 }

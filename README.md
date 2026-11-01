@@ -143,7 +143,7 @@ gzipped).
 The worker starts with the first schematic drawn, so a vault without spice blocks never loads ELK
 or the parsers; included files are watched from the start. Schematics also draw in embedded notes,
 hover previews, Canvas cards and exported PDFs (in light colours). Settings appear in Obsidian's
-settings search on 1.13 and later, the dialect as a dropdown. On an Obsidian whose built-in
+settings search, the dialect as a dropdown. On an Obsidian whose built-in
 Chromium predates `light-dark()`, schematics keep the white card in dark themes.
 
 Desktop only: included files are read from the vault's folder on disk.
