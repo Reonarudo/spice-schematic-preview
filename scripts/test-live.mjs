@@ -19,7 +19,7 @@ const BASE = 'spice';
 const FIXTURE = {
   file: 'examples/view-toggle.md',
   /** Files beside the note that its blocks include. */
-  includes: ['examples/models/opamp.inc'],
+  includes: ['examples/models/opamp.inc', 'examples/notes/relative-includes.md'],
   /** Spice blocks in the note, in document order. */
   fences: 12,
   /** Positions of the two blocks with identical bodies. */
@@ -46,6 +46,8 @@ for (const file of ['main.js', 'manifest.json', 'styles.css']) await cp(file, jo
 await cp(FIXTURE.file, join(vault, 'view-toggle.md'));
 for (const file of FIXTURE.includes) await cp(file, join(vault, file.slice('examples/'.length)), { recursive: true });
 await writeFile(join(vault, 'other.md'), '# Another note\n');
+// A real file just above the vault, which notes/relative-includes.md names and must not read.
+await writeFile(join(root, 'outside.inc'), '.subckt opamp a b c\n.ends\n');
 await writeFile(join(vault, '.obsidian', 'community-plugins.json'), JSON.stringify([manifest.id]));
 await writeFile(join(vault, '.obsidian', 'app.json'), JSON.stringify({ defaultViewMode: 'preview', livePreview: true }));
 
@@ -273,6 +275,37 @@ try {
     }
     assert.equal(old, 0);
     assert.equal((await settle('reading')).filter((fence) => fence.holds === 'diagram').length, FIXTURE.fences - 2);
+  });
+
+  await check('a missing include recovers once the file is created, and a file above the vault is refused', async () => {
+    const missing = () => state('reading').then((now) => now[FIXTURE.missing]);
+    await page.evaluate(async () => { await app.vault.create('nowhere.lib', '.model Q PNP\n'); });
+    let block = await missing();
+    for (let i = 0; i < 50 && block.holds !== 'diagram'; i++) {
+      await sleep(100);
+      block = await missing();
+    }
+    assert.equal(block.holds, 'diagram', 'drawn once nowhere.lib exists');
+    await page.evaluate(async () => { await app.vault.delete(app.vault.getAbstractFileByPath('nowhere.lib')); });
+    for (let i = 0; i < 50 && block.holds !== 'error'; i++) {
+      await sleep(100);
+      block = await missing();
+    }
+    assert.match(block.error, /^nowhere\.lib could not be read: file not found/);
+
+    // A note in a subfolder: `../` stays inside the vault and reads; `../../` climbs above it.
+    await page.evaluate(async () => {
+      await app.workspace.getLeaf(false).openFile(app.vault.getAbstractFileByPath('notes/relative-includes.md'), { state: { mode: 'preview' } });
+    });
+    const relative = await settle('reading', 2);
+    assert.equal(relative[0].holds, 'diagram');
+    assert.ok(relative[0].texts.includes('opamp') && relative[0].texts.includes('inp'), JSON.stringify(relative[0].texts));
+    assert.equal(relative[1].holds, 'error');
+    assert.match(relative[1].error, /^\.\.\/\.\.\/outside\.inc could not be read: the file is outside this vault\n/);
+    await page.evaluate(async () => {
+      await app.workspace.getLeaf(false).openFile(app.vault.getAbstractFileByPath('view-toggle.md'), { state: { mode: 'preview' } });
+    });
+    await settle('reading');
   });
 
   await check('identical bodies share a fence key', async () => {

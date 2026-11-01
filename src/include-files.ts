@@ -3,14 +3,10 @@
  * `.lib` cards name, through the renderer's `prepare` (run in the render worker, ADR 0001), and
  * keep the outcome. The port of spice-markdown-preview's include-files.ts.
  *
- * Obsidian's rules decide whether files may be read at all: only from a vault on this computer,
- * only for a note in it. Reading itself (paths relative to the note that stay inside the vault,
- * never through a symlink, never over the size limits, never a file that changes mid-read) is
- * the renderer's `nodeFileReader`, rooted at the vault's folder, on the main thread. Errors never
- * reveal an absolute path.
+ * The files are read on the main thread through Obsidian's vault (src/vault-reader.ts): only files
+ * in this vault, relative to the note. Errors never reveal a path.
  */
-import { posix } from 'node:path';
-import type { FileReader, NodeFileReaderOptions } from '@reonarudo/spice-renderer';
+import type { FileReader } from '@reonarudo/spice-renderer';
 import type { PrepareOutcome } from './host';
 
 interface Entry {
@@ -27,43 +23,6 @@ const MAX_ENTRIES = 512;
 
 const FULL = 'The included files of open documents exceed the 64 MiB cache. ' +
   'Close unused Markdown documents and run SPICE Schematic Preview: Refresh included files.';
-
-/** A reader that refuses every file with one reason; netlists that include nothing never call it. */
-export const refuse = (error: string): FileReader => ({ read: async () => ({ error }) });
-
-/** Where the vault is, for the library's reader; `undefined` when it is not a folder on this computer. */
-export interface Vault {
-  /** Absolute path of the vault's folder. */
-  basePath(): string | undefined;
-  /** Absolute path of a vault path. */
-  fullPath(path: string): string;
-}
-
-/**
- * The Obsidian file reader adapter: the vault rules first, then the library's reader rooted at the
- * vault's folder. `record` hears the vault path of every file asked for.
- */
-export function readerFor(
-  nodeFileReader: (options: NodeFileReaderOptions) => FileReader,
-  vault: Vault,
-  note: string,
-  record: (path: string) => void
-): FileReader {
-  const root = vault.basePath();
-  if (root === undefined) return refuse('files are read only from a local folder');
-  if (!note) return refuse('the note is not in this vault');
-  const reader = nodeFileReader({ root, document: vault.fullPath(note) });
-  return {
-    async read(key, options) {
-      record(posix.join(posix.dirname(note), key));
-      const result = await reader.read(key, options);
-      // The library's wording is about a site's content root; here the root is the vault.
-      return 'error' in result && result.error === 'the file is outside the content root'
-        ? { error: 'it is outside this vault' }
-        : result;
-    }
-  };
-}
 
 /** Prepare one fence: the host's `prepare`, with the reader that serves it. */
 export type Prepare = (source: string, dialect: string, reader: FileReader) => Promise<PrepareOutcome>;

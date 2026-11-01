@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4 (2026-11-01)
+
+- Included files (`.include`, `.inc`, `.lib`) are read through Obsidian's vault API instead of
+  Node's file system: only files in the vault, relative to the note (`../` may reach another
+  folder of the vault); a path above the vault is an error, "the file is outside this vault".
+  Files in hidden folders are not in Obsidian's index and are reported as not found. `main.js`
+  no longer contains Node's `fs` module, or any Node module.
+
 ## 0.1.3 (2026-11-01)
 
 - Settings come only from Obsidian's declarative settings definitions; the older `display()`

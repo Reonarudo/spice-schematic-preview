@@ -77,8 +77,11 @@ R2 inv out 47k
 ```
 ~~~
 
-Paths are relative to the note and must stay inside the vault, through no symbolic link;
-otherwise the include is an error at its line, saying why. Includes may nest, up to 8 levels.
+Files are read through Obsidian's vault, never from disk directly: paths are relative to the
+note, `../` may reach another folder of the vault, and nothing outside the vault is read (a path
+that climbs above it is an error, "the file is outside this vault"). Files in hidden folders
+(names starting with `.`) are not in Obsidian's index, so they are not found. A file that cannot
+be read is an error at its include line, saying why. Includes may nest, up to 8 levels.
 A file may be 8 MB; a block may include 32 files and 16 MB in all; all blocks' included files
 together are cached up to 64 MiB. Only text is read, and only names and elements are taken from
 it; nothing is run.
@@ -136,7 +139,7 @@ dark themes** in the plugin's settings.
 Rendering runs in a Web Worker inside Obsidian, built from spice-renderer: the seven dialect
 parsers compiled to WebAssembly, the Eclipse Layout Kernel (elkjs) and the SVG drawing. The
 library's `prepare` step runs in the same worker; the files it asks for are read on the main
-thread by the library's own file reader, rooted at the vault's folder. Nothing is downloaded,
+thread through Obsidian's vault API (`src/vault-reader.ts`); `main.js` uses no Node module. Nothing is downloaded,
 installed or written to disk; the worker is embedded in `main.js` (about 2.5 MB, 0.76 MB
 gzipped).
 
@@ -146,7 +149,7 @@ hover previews, Canvas cards and exported PDFs (in light colours). Settings appe
 settings search, the dialect as a dropdown. On an Obsidian whose built-in
 Chromium predates `light-dark()`, schematics keep the white card in dark themes.
 
-Desktop only: included files are read from the vault's folder on disk.
+Desktop only for now.
 
 ## Development
 

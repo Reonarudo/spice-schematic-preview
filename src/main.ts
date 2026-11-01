@@ -1,9 +1,7 @@
 import {
-  FileSystemAdapter, MarkdownRenderChild, Plugin, TFile, debounce,
+  MarkdownRenderChild, Plugin, TFile, debounce,
   type MarkdownPostProcessorContext
 } from 'obsidian';
-import { join } from 'node:path';
-import { nodeFileReader } from '#renderer/dist/fileReader.js';
 import WORKER_SOURCE from 'virtual:render-worker';
 import { parseAttributes, type FenceAttributes } from './attributes';
 import { createResults, type Results } from './cache';
@@ -11,10 +9,11 @@ import type { RenderResult } from '@reonarudo/spice-renderer';
 import { drawBlock } from './block';
 import { BASE_CLASS, buildFence, fenceKey, isSourceView, setView } from './fence';
 import { createHost, type Host, type WorkerLike } from './host';
-import { IncludeFiles, readerFor } from './include-files';
+import { IncludeFiles } from './include-files';
 import { locate, scanFences } from './info';
 import { DEFAULT_SETTINGS, SpiceSettingTab, readSettings, type Settings } from './settings';
 import { ToggleStore } from './toggle';
+import { vaultFileReader } from './vault-reader';
 
 /** The language word Obsidian matches for this plugin's code blocks. */
 const WORD = BASE_CLASS;
@@ -83,16 +82,11 @@ export default class SpicePlugin extends Plugin {
     this.settings = readSettings(data?.settings);
     this.toggles = new ToggleStore(data?.toggles, () => this.saveSoon());
 
-    const adapter = this.app.vault.adapter;
-    const vault = {
-      basePath: () => adapter instanceof FileSystemAdapter ? adapter.getBasePath() : undefined,
-      fullPath: (path: string) => join((adapter as FileSystemAdapter).getBasePath(), path)
-    };
     this.includes = new IncludeFiles(
       (source, dialect, reader) => this.unloaded
         ? Promise.resolve({ status: 'unavailable', reason: 'the renderer was stopped' })
         : this.renderer().host.prepare(source, dialect, reader),
-      (note, record) => readerFor(nodeFileReader, vault, note, record)
+      (note, record) => vaultFileReader(this.app.vault, note, record)
     );
 
     this.registerMarkdownCodeBlockProcessor(WORD, (source, el, ctx) => this.process(source, el, ctx));

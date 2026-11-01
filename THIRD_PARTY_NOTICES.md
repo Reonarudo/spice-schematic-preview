@@ -4,14 +4,14 @@ The plugin's own TypeScript, tests, build scripts and stylesheet are MIT license
 `LICENSE`). This does not relicense what `main.js` embeds.
 
 `main.js` embeds a Web Worker bundle built from the following, and the main-thread part
-embeds the renderer's file reader and dialect list. The renderer's licence copies are in
+embeds the renderer's dialect list. The renderer's licence copies are in
 `node_modules/@reonarudo/spice-renderer/licenses/` and its provenance in its
 `THIRD_PARTY_NOTICES.md`; keep them with any redistribution.
 
 ## SPICE renderer
 
 [spice-renderer](https://github.com/Reonarudo/spice-renderer) 1.0.0 (MIT) supplies the
-netlist reader, the element catalogue, `prepare`, the file reader, the layout glue and the SVG
+netlist reader, the element catalogue, `prepare`, the layout glue and the SVG
 drawing. It carries:
 
 - the generated dialect parsers (`vendor/parsers/*.cjs`, all seven embedded): scanners and

@@ -1,9 +1,9 @@
 // Builds main.js: the plugin, with the render worker's bundle embedded as a string.
 // `--watch` rebuilds the plugin on change (the worker is bundled once per start).
 //
-// main.js runs in Obsidian's window, where Node's built-ins are available to `require`. The
-// library's file reader (dist/fileReader.js) uses `fs` and `path` from there; everything else
-// that touches the renderer's engine is in the worker.
+// main.js uses no Node built-ins: included files are read through Obsidian's vault
+// (src/vault-reader.ts), and everything that touches the renderer's engine is in the worker.
+// None is marked external, so an import of one fails the build instead of reaching main.js.
 import { context } from 'esbuild';
 import { licenseBanner } from './licenses.mjs';
 import { bundleWorker, rendererFiles } from './worker-bundle.mjs';
@@ -29,7 +29,7 @@ const ctx = await context({
   format: 'cjs',
   platform: 'browser',
   target: 'es2022',
-  external: ['obsidian', 'electron', '@codemirror/*', '@lezer/*', 'node:fs', 'node:fs/promises', 'node:path'],
+  external: ['obsidian', 'electron', '@codemirror/*', '@lezer/*'],
   plugins: [embedWorker, rendererFiles],
   sourcemap: watch ? 'inline' : false,
   treeShaking: true,
