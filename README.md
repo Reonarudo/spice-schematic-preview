@@ -114,7 +114,7 @@ Schematics follow the theme, as Mermaid diagrams do. In a dark theme they sit on
 dark-theme colours: the renderer draws black line art, so wires, symbols and every label (part
 names, values, net labels, pin names) take Obsidian's own text colour. In a light theme they sit on
 a white card with their exact colours. To keep every schematic on a white card, turn off **Follow
-dark themes** in the plugin's settings. See `docs/adr/0002-dark-theme-colours.md`.
+dark themes** in the plugin's settings.
 
 ## Settings
 
@@ -138,7 +138,7 @@ parsers compiled to WebAssembly, the Eclipse Layout Kernel (elkjs) and the SVG d
 library's `prepare` step runs in the same worker; the files it asks for are read on the main
 thread by the library's own file reader, rooted at the vault's folder. Nothing is downloaded,
 installed or written to disk; the worker is embedded in `main.js` (about 2.5 MB, 0.76 MB
-gzipped). See `docs/adr/0001-runtime-host.md`.
+gzipped).
 
 The worker starts with the first schematic drawn, so a vault without spice blocks never loads ELK
 or the parsers; included files are watched from the start. Schematics also draw in embedded notes,
