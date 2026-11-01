@@ -25,6 +25,11 @@ First version, ported from the VS Code extension
   64 MiB cache of included files behave as in the VS Code extension.
 - Rendering and `prepare` run in a Web Worker inside Obsidian, from spice-renderer 1.0.0's
   parsers, layout (elkjs) and drawing; no Node install is needed.
-- Settings: dialect, layout timeout (restarts the worker), following dark themes, debug logging.
+- Settings: dialect, layout timeout (restarts the worker), following dark themes, debug logging;
+  listed in Obsidian's settings search (1.13 and later).
+- The renderer starts with the first schematic drawn, not when Obsidian starts.
+- Schematics draw in embedded notes, hover previews, Canvas and PDF export, and are built with
+  Obsidian's DOM helpers, so pop-out windows get their own elements.
+- On an Obsidian whose Chromium lacks `light-dark()`, schematics keep their white card.
 - Commands: restart the renderer; refresh included files; show every schematic in the current
   note.

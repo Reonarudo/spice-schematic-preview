@@ -21,7 +21,6 @@ const scope = self as unknown as Scope;
 type Result = Omit<Reply, 'type' | 'id'>['result'] & { discard?: true };
 type Layout = Parameters<typeof renderNetlist>[2];
 type Includes = NonNullable<Parameters<typeof renderNetlist>[3]>;
-type Dialect = NonNullable<Parameters<typeof renderNetlist>[4]>;
 
 /** An ngspice netlist that touches every common symbol, drawn before the worker reports ready. */
 const WARM_UP = 'V1 in 0 1\nR1 in out 1k\nC1 out 0 1u\nQ1 out in 0 npn\nM1 out in 0 0 nmos\nX1 in out box';
@@ -34,7 +33,8 @@ const WARM_UP = 'V1 in 0 1\nR1 in out 1k\nC1 out 0 1u\nQ1 out in 0 npn\nM1 out i
  * path it takes under Node; it is removed straight after.
  */
 function createElk(): InstanceType<typeof ELK> {
-  const global = globalThis as { document?: unknown };
+  // The worker's global scope: where ELK looks `document` up.
+  const global = self as unknown as { document?: unknown };
   const had = 'document' in global;
   if (!had) global.document = {};
   try {
@@ -59,7 +59,7 @@ async function start(): Promise<(request: Omit<RenderRequest, 'type' | 'id'>) =>
     const includes: Includes = {
       files: Object.fromEntries(files.map((file) => [file.key, 'text' in file ? file.text : { error: file.error }]))
     };
-    const result = await renderNetlist(source, symbols, layout, includes, dialect as Dialect);
+    const result = await renderNetlist(source, symbols, layout, includes, dialect);
     if (result.status === 'failure') {
       // The netlist reader counts columns from 0; the contract counts them from 1.
       return result.column === undefined ? result : { ...result, column: result.column + 1 };

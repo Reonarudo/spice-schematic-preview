@@ -63,8 +63,10 @@ interface Drawn {
 export default class SpicePlugin extends Plugin {
   settings: Settings = DEFAULT_SETTINGS;
   private toggles!: ToggleStore;
+  /** The renderer, started by the first schematic drawn (`renderer()`), not at load. */
   private host: Host | undefined;
-  private results!: Results;
+  private results: Results | undefined;
+  private unloaded = false;
   private includes!: IncludeFiles;
   private workerUrl: string | undefined;
   private readonly drawn = new Set<Drawn>();
@@ -81,18 +83,15 @@ export default class SpicePlugin extends Plugin {
     this.settings = readSettings(data?.settings);
     this.toggles = new ToggleStore(data?.toggles, () => this.saveSoon());
 
-    this.workerUrl = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: 'text/javascript' }));
-    this.startHost();
-
     const adapter = this.app.vault.adapter;
     const vault = {
       basePath: () => adapter instanceof FileSystemAdapter ? adapter.getBasePath() : undefined,
       fullPath: (path: string) => join((adapter as FileSystemAdapter).getBasePath(), path)
     };
     this.includes = new IncludeFiles(
-      (source, dialect, reader) => this.host
-        ? this.host.prepare(source, dialect, reader)
-        : Promise.resolve({ status: 'unavailable', reason: 'the renderer was stopped' }),
+      (source, dialect, reader) => this.unloaded
+        ? Promise.resolve({ status: 'unavailable', reason: 'the renderer was stopped' })
+        : this.renderer().host.prepare(source, dialect, reader),
       (note, record) => readerFor(nodeFileReader, vault, note, record)
     );
 
@@ -109,7 +108,7 @@ export default class SpicePlugin extends Plugin {
       name: 'Refresh included files',
       // Doubles as "retry": a cached timeout is forgotten along with the files.
       callback: () => {
-        this.results.clear();
+        this.results?.clear();
         this.includes.clear();
         this.redrawAll();
       }
@@ -152,8 +151,10 @@ export default class SpicePlugin extends Plugin {
   }
 
   onunload(): void {
+    this.unloaded = true;
     this.host?.dispose();
     this.host = undefined;
+    this.results = undefined;
     if (this.workerUrl) URL.revokeObjectURL(this.workerUrl);
     document.body.classList.remove(FOLLOW_DARK_CLASS);
     void this.persist();
@@ -172,20 +173,30 @@ export default class SpicePlugin extends Plugin {
     await this.saveData({ settings: this.settings, toggles: this.toggles.toJSON() });
   }
 
-  private startHost(): void {
-    const url = this.workerUrl!;
-    this.host = createHost(
+  /**
+   * The renderer, started on first use: a vault with no spice blocks never starts the worker or
+   * loads ELK and the parsers. The include-file machinery stays ready from load; only the worker
+   * waits.
+   */
+  private renderer(): { host: Host; results: Results } {
+    if (this.host && this.results) return { host: this.host, results: this.results };
+    this.workerUrl ??= URL.createObjectURL(new Blob([WORKER_SOURCE], { type: 'text/javascript' }));
+    const url = this.workerUrl;
+    const host = createHost(
       () => new Worker(url, { name: 'spice-schematic-preview' }) as unknown as WorkerLike,
       { timeout: Math.round(this.settings.layoutTimeout * 1000) }
     );
-    const host = this.host;
-    this.results = createResults((prepared) => host.render(prepared), (line) => this.log(line));
+    const results = createResults((prepared) => host.render(prepared), (line) => this.log(line));
+    this.host = host;
+    this.results = results;
+    return { host, results };
   }
 
-  /** A fresh worker with the current settings, and every drawn block drawn again: cached timeouts are retried. */
+  /** Stop the worker; every drawn block is drawn again, starting a fresh one with the current settings, so cached timeouts are retried. */
   private restart(): void {
     this.host?.dispose();
-    this.startHost();
+    this.host = undefined;
+    this.results = undefined;
     this.redrawAll();
   }
 
@@ -202,8 +213,7 @@ export default class SpicePlugin extends Plugin {
   }
 
   private async process(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext): Promise<void> {
-    const parts = buildFence(el.ownerDocument, source, fenceKey(source));
-    el.append(parts.wrapper);
+    const parts = buildFence(el, source, fenceKey(source));
     let placement: Placement | undefined;
     let generation = 0;
 
@@ -215,7 +225,11 @@ export default class SpicePlugin extends Plugin {
       const dialect = attributes.dialect ?? this.settings.dialect;
       drawn.includeKey = IncludeFiles.key(ctx.sourcePath, dialect, source);
       const outcome = (): Promise<RenderResult> => this.includes.prepare(ctx.sourcePath, source, dialect)
-        .then((prepared) => prepared.status === 'prepared' ? this.results.render(prepared.prepared) : prepared);
+        .then((prepared): RenderResult | Promise<RenderResult> => {
+          if (prepared.status !== 'prepared') return prepared;
+          if (this.unloaded) return { status: 'unavailable', reason: 'the renderer was stopped' };
+          return this.renderer().results.render(prepared.prepared);
+        });
       await drawBlock(parts.rendering, outcome, {
         attributes,
         source,

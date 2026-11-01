@@ -1,15 +1,17 @@
 // Helpers the tests share: a DOM, and one fence built the way the plugin builds it.
 import { Window } from 'happy-dom';
+import { installObsidianDom } from './obsidian-dom';
 import type { RenderResult } from '@reonarudo/spice-renderer';
 import { parseAttributes } from '../src/attributes';
 import { buildFence, fenceKey, showResult } from '../src/fence';
 
 export const window = new Window();
+installObsidianDom(window as never);
 export const document = window.document as unknown as Document;
 
 /** A fence with info string `info` and `body`, its rendering slot filled with `result`. */
 export function fence(info: string, body: string, result: RenderResult): HTMLElement {
-  const parts = buildFence(document, body, fenceKey(body));
+  const parts = buildFence(document.createElement('div'), body, fenceKey(body));
   showResult(parts.rendering, result, parseAttributes(info).attributes, body);
   return parts.wrapper;
 }

@@ -15,7 +15,7 @@ const deferred = () => {
   const promise = new Promise<RenderResult>((done) => { resolve = done; });
   return { promise, resolve };
 };
-const block = () => buildFence(document, 'R1 a 0 1', fenceKey('R1 a 0 1'));
+const block = () => buildFence(document.createElement('div'), 'R1 a 0 1', fenceKey('R1 a 0 1'));
 
 test('a new block shows "Reading the netlist…" while it is pending, then the schematic', async () => {
   const parts = block();
@@ -36,7 +36,7 @@ test('a fast block never shows the loading line', async () => {
 });
 
 test('a block drawn again keeps its old drawing until the new one is ready, and the source view shows the new body', async () => {
-  const parts = buildFence(document, 'R1 a 0 1k', fenceKey('R1 a 0 1k'));
+  const parts = buildFence(document.createElement('div'), 'R1 a 0 1k', fenceKey('R1 a 0 1k'));
   await drawBlock(parts.rendering, async () => svg('old'), { attributes: {}, source: '', current: () => true });
   const pending = deferred();
   const done = drawBlock(parts.rendering, () => pending.promise, { attributes: {}, source: '', current: () => true, delay: 5 });

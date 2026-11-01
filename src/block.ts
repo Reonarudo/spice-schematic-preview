@@ -24,8 +24,7 @@ export interface DrawOptions {
  * rather than flash a placeholder.
  */
 export async function drawBlock(rendering: HTMLElement, produce: () => Promise<RenderResult>, options: DrawOptions): Promise<void> {
-  const view = rendering.ownerDocument.defaultView ?? globalThis;
-  const slow = view.setTimeout(() => {
+  const slow = window.setTimeout(() => {
     if (options.current() && !rendering.hasChildNodes()) showLoading(rendering);
   }, options.delay ?? LOADING_DELAY_MS);
   try {
@@ -37,6 +36,6 @@ export async function drawBlock(rendering: HTMLElement, produce: () => Promise<R
     options.report?.(`SPICE render failed: ${cause}`);
     if (options.current()) showError(rendering, `The schematic renderer failed: ${cause}`);
   } finally {
-    view.clearTimeout(slow);
+    window.clearTimeout(slow);
   }
 }

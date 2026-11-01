@@ -18,7 +18,7 @@ const ICON_CODE = `<svg ${LUCIDE} class="svg-icon lucide-code-2 spice-icon-code"
 const ICON_GRAPH = `<svg ${LUCIDE} class="svg-icon lucide-network spice-icon-graph">` +
   '<rect x="16" y="16" width="6" height="6" rx="1"></rect><rect x="2" y="16" width="6" height="6" rx="1"></rect><rect x="9" y="2" width="6" height="6" rx="1"></rect>' +
   '<path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path><path d="M12 12V8"></path></svg>';
-const TOGGLE = `<button type="button" class="spice-toggle clickable-icon" aria-pressed="false" aria-label="Show source">${ICON_CODE}${ICON_GRAPH}</button>`;
+const TOGGLE = `<button class="spice-toggle clickable-icon" type="button" aria-pressed="false" aria-label="Show source">${ICON_CODE}${ICON_GRAPH}</button>`;
 const LOADING = '<div class="spice-loading" role="status">Reading the netlist…</div>';
 
 // The DOM contract, asserted exactly once, here.
@@ -66,7 +66,7 @@ test('setView flips the wrapper, the button state and its name, and back', () =>
 test('an error card, a renderer failure and the loading line sit in the rendering slot', () => {
   assert.equal(rendering(fence('spice', 'R1 a 0 1\n', { status: 'failure', message: 'bad' })),
     '<div class="spice-error" role="alert"><pre>bad</pre></div>');
-  const parts = buildFence(document, 'R1 a 0 1\n', fenceKey('R1 a 0 1\n'));
+  const parts = buildFence(document.createElement('div'), 'R1 a 0 1\n', fenceKey('R1 a 0 1\n'));
   showError(parts.rendering, 'The schematic renderer failed: boom');
   assert.equal(rendering(parts.wrapper), '<div class="spice-error" role="alert"><pre>The schematic renderer failed: boom</pre></div>');
   showLoading(parts.rendering);

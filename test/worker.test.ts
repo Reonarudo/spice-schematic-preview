@@ -13,13 +13,16 @@ import { fence } from './helpers';
 
 const PRELUDE = `
 const { parentPort } = require('node:worker_threads');
-globalThis.self = {
-  postMessage: (message, transfer) => parentPort.postMessage(message, transfer),
-  set onmessage(handler) {
+// As in a browser Worker, \`self\` is the global scope itself.
+globalThis.self = globalThis;
+globalThis.postMessage = (message, transfer) => parentPort.postMessage(message, transfer);
+Object.defineProperty(globalThis, 'onmessage', {
+  configurable: true,
+  set(handler) {
     parentPort.removeAllListeners('message');
     if (handler) parentPort.on('message', (data) => handler({ data }));
   }
-};
+});
 `;
 
 let source: string;

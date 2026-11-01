@@ -126,10 +126,10 @@ export function createHost(spawnWorker: () => WorkerLike, options: HostOptions =
     const engine: Engine = { worker, started: Promise.resolve({ type: 'started' }), abandon: () => {}, pending, readers: new Map() };
     engine.started = new Promise<Started>((resolve) => {
       engine.abandon = () => {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         resolve({ type: 'failed', reason: 'the renderer was stopped' });
       };
-      const timer = setTimeout(
+      const timer = window.setTimeout(
         () => resolve({ type: 'failed', reason: `the SPICE layout worker did not start within ${startupTimeout} ms` }),
         startupTimeout
       );
@@ -142,7 +142,7 @@ export function createHost(spawnWorker: () => WorkerLike, options: HostOptions =
           serve(engine, data);
           return;
         }
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         resolve(data);
       };
     });
@@ -181,13 +181,13 @@ export function createHost(spawnWorker: () => WorkerLike, options: HostOptions =
     const id = ++nextId;
     let timedOut = false;
     const answer = await new Promise<Answer | undefined>((resolve) => {
-      const timer = setTimeout(() => {
+      const timer = window.setTimeout(() => {
         timedOut = true;
         engine.pending.delete(id);
         resolve(undefined);
       }, budget);
       engine.pending.set(id, (reply) => {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         engine.pending.delete(id);
         resolve(reply);
       });
