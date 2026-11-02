@@ -1,10 +1,8 @@
 # SPICE Schematic Preview
 
-Draws SPICE netlists in `spice` code blocks as circuit schematics in Obsidian, in Reading view
-and Live Preview. It draws; it never simulates. A port of the VS Code extension of the same
-name.
-
-## Usage
+Turn SPICE netlists in your notes into circuit schematics. Write a `spice` code block and the
+schematic appears in its place, in Reading view and Live Preview. The plugin only draws circuits;
+it never simulates them. Desktop only.
 
 ~~~markdown
 ```spice
@@ -19,54 +17,68 @@ VCC vcc 0 5
 ```
 ~~~
 
-Only `spice` blocks are drawn; `cir`, `ngspice` and other languages are left alone. Placement
-and wiring are automatic: the netlist says what is connected, not where it goes. What each
-element is drawn as, and how each dialect is read, is described in the
-[VS Code extension's README](https://github.com/Reonarudo/spice-markdown-preview#what-is-drawn);
-the same library, [spice-renderer](https://github.com/Reonarudo/spice-renderer), draws both.
+## Features
 
-The first line of a SPICE file is its title; a code block has none, so start a title with `*`
-to make it a comment.
+- Schematics in Reading view, Live Preview, embedded notes, hover previews, Canvas cards and
+  exported PDFs.
+- Six SPICE dialects: ngspice, LTspice, PSpice, HSPICE, Xyce and Spectre.
+- Model libraries and subcircuits from files in your vault, through `.include` and `.lib`.
+- Captions, alignment and alt text for each schematic.
+- A button to see a netlist without leaving Reading view.
+- Follows your theme: schematics stay readable in dark themes.
+- Works offline.
 
-## Fence attributes
+## Install
 
-A `spice` fence may carry an attribute block:
+1. In Obsidian, open **Settings → Community plugins** and turn off **Restricted mode** if it's on.
+2. Select **Browse**, search for **SPICE Schematic Preview**, then select **Install** and
+   **Enable**.
+
+To install by hand instead, download `main.js`, `manifest.json` and `styles.css` from the
+[latest release](https://github.com/Reonarudo/spice-schematic-preview/releases/latest) into
+`<your vault>/.obsidian/plugins/spice-schematic-preview/`, then enable the plugin.
+
+## Writing netlists
+
+Put the netlist in a code block tagged `spice`. Placement and wiring are automatic: the netlist
+says what's connected, not where it goes. The first line of a SPICE file is its title, but a code
+block has none, so start a title line with `*` to make it a comment.
+
+### What gets drawn
+
+| Element | Drawn as |
+| --- | --- |
+| `R`, `C`, `L` | Resistor, capacitor, inductor, with the value |
+| `D` | Diode, with its model |
+| `V`, `I` | Voltage or current source |
+| `Q` | NPN or PNP transistor, from its `.model` |
+| `M` | NMOS or PMOS transistor, from its `.model` |
+| `X` | A box named after the subcircuit, with its pin names |
+| Other elements | A box saying what the element is |
+
+Every connection to ground (`0` or `gnd`) gets its own ground symbol, and global nodes get net
+labels. Simulation commands such as `.tran` are skipped.
+
+### Dialects
+
+Blocks are read as ngspice unless you choose otherwise, either for all blocks with the **Dialect**
+setting or for one block with the `dialect` option:
 
 ~~~markdown
-```spice {alt="A CMOS inverter" caption="Figure 1: CMOS inverter" align="center"}
-M1 out in vdd vdd pch
-M2 out in 0 0 nch
-.model nch NMOS
-.model pch PMOS
+```spice {dialect="ltspice"}
+V1 in 0 PULSE(0 5 0 1n 1n 5u 10u)
+R1 in out 1k
+C1 out 0 1n
 ```
 ~~~
 
-- `alt`: an accessible name, for readers using assistive technology.
-- `caption`: plain text shown beneath the schematic.
-- `align`: `left`, `center` or `right`.
-- `class`: an extra CSS class on the `<svg>`, alongside the built-in `spice` class.
-- `dialect`: the SPICE dialect this block is written in (see below).
+The dialect names are `ngspice`, `ltspice`, `pspice`, `hspice`, `xyce` and `spectre`. The
+[spice-renderer documentation](https://github.com/Reonarudo/spice-renderer#dialects) lists what
+each one reads.
 
-Values must be quoted, with single or double quotes; a backslash escapes a matching quote or a
-backslash. Values are plain text, never Markdown or HTML. Anything unrecognised is ignored and
-the schematic still renders; turn on **Debug logging** in the plugin's settings to see what was
-ignored in the developer console.
+### Model libraries and subcircuits
 
-Attributes are read from the note's text. Where Obsidian renders a block without its note (some
-embeds and exports), the schematic renders bare, in the **Dialect** setting's dialect.
-
-## Dialects
-
-A block is read in the dialect its `dialect` attribute names (`ngspice`, `ltspice`, `pspice`,
-`hspice`, `xyce` or `spectre`, in any case), else in the **Dialect** setting's (default
-`ngspice`). Files a block includes are read in its dialect. An attribute value that is not a
-dialect is an error naming the six. The language word is always `spice`: the dialect is never
-guessed from the content, and ` ```ltspice ` is not drawn.
-
-## Included files
-
-`.include`, `.inc` and `.lib` read files, as SPICE does, so a model library can decide which
-transistors are PNP and name a subcircuit's pins:
+`.include`, `.inc` and `.lib` read files from your vault, as SPICE does:
 
 ~~~markdown
 ```spice
@@ -77,104 +89,96 @@ R2 inv out 47k
 ```
 ~~~
 
-Files are read through Obsidian's vault, never from disk directly: paths are relative to the
-note, `../` may reach another folder of the vault, and nothing outside the vault is read (a path
-that climbs above it is an error, "the file is outside this vault"). Files in hidden folders
-(names starting with `.`) are not in Obsidian's index, so they are not found. A file that cannot
-be read is an error at its include line, saying why. Includes may nest, up to 8 levels.
-A file may be 8 MB; a block may include 32 files and 16 MB in all; all blocks' included files
-together are cached up to 64 MiB. Only text is read, and only names and elements are taken from
-it; nothing is run.
+- Paths start from the note's folder. `../` reaches other folders of the vault.
+- Only files in your vault can be read. A path that leads outside it shows "the file is outside
+  this vault".
+- Files in hidden folders (names starting with `.`) aren't found, because Obsidian doesn't index
+  them.
+- Included files may include others, up to 8 levels deep. Only names and elements are taken from
+  them; nothing is run.
+- When an included file changes, the schematics that use it redraw. **Refresh included files** in
+  the command palette rereads every file.
 
-A change to an included file made in Obsidian, or picked up by Obsidian from disk, redraws the
-blocks that use it. **Refresh included files** in the command palette rereads every included
-file and draws every block again (it also retries blocks that timed out).
+### Captions and other options
 
-## Viewing the source
+Add options in braces after `spice`:
 
-The plugin follows Obsidian's own handling of Mermaid diagrams:
+~~~markdown
+```spice {caption="Figure 1: CMOS inverter" align="center" alt="A CMOS inverter"}
+M1 out in vdd vdd pch
+M2 out in 0 0 nch
+.model nch NMOS
+.model pch PMOS
+```
+~~~
 
-- **Live Preview:** hovering a schematic shows Obsidian's **Edit this block** button in its top
-  corner, which opens the code block for editing, as for Mermaid. Live Preview always shows the
-  schematic.
-- **Reading view:** hovering a schematic shows a button of the same look in the same corner,
-  **Show source**, which flips the block to its source: the block as written, so an `.include`
-  line stays an include line. **Show schematic** flips it back. A flipped block stays flipped
-  across re-renders, reopening the note and restarting Obsidian, and in every Reading view of the
-  note. Two blocks with the same body are told apart by their order. **Show every schematic in
-  this note** in the command palette flips them all back.
+| Option | What it does |
+| --- | --- |
+| `dialect` | The SPICE dialect of this block, as above. |
+| `caption` | Text shown under the schematic. |
+| `align` | `left`, `center` or `right`. |
+| `alt` | A description read aloud by screen readers. |
+| `class` | A CSS class, for styling the schematic with a CSS snippet. |
 
-## Errors and limits
+Put each value in quotes. Values are plain text, not Markdown. If an option is misspelled, it's
+ignored and the schematic still appears; an unknown dialect is shown as an error that lists the
+six.
 
-A netlist error is shown in place of the schematic, quoting the line with a caret under the
-column. A netlist may have up to 400 elements and 64 000 characters. Layout is limited by the
-**Layout timeout** setting (seconds, 0.5 to 60, default 3); a circuit that takes longer shows a
-timeout message until it changes, and a change to the setting restarts the layout worker and
-retries it. Densely connected circuits of a few hundred parts can need more than the default.
-Reading a block's netlist and included files may take 10 seconds.
+## Viewing the netlist
 
-Schematics follow the theme, as Mermaid diagrams do. In a dark theme they sit on the page in
-dark-theme colours: the renderer draws black line art, so wires, symbols and every label (part
-names, values, net labels, pin names) take Obsidian's own text colour. In a light theme they sit on
-a white card with their exact colours. To keep every schematic on a white card, turn off **Follow
-dark themes** in the plugin's settings.
+- **Reading view:** hover over a schematic and select the **</>** button in its corner to see the
+  netlist as written. Select it again to see the schematic. Obsidian remembers which schematics you
+  switched, even after a restart. **Show every schematic in this note** in the command palette
+  switches them all back.
+- **Live Preview:** select Obsidian's own **Edit this block** button, just as for a Mermaid
+  diagram.
+
+## Dark and light themes
+
+Schematics follow your theme. In a dark theme, wires, symbols and labels take your theme's text
+colour on the page. In a light theme, schematics appear on a white card.
+
+To always show schematics on a white card, turn off **Follow dark themes** in the plugin's
+settings.
 
 ## Settings
 
-- **Dialect**: the dialect blocks without a `dialect` attribute are read in.
-- **Layout timeout**: seconds allowed to lay out one schematic.
-- **Follow dark themes** (on by default): in a dark theme, draw schematics on the page in
-  dark-theme colours instead of on a white card.
-- **Debug logging**: report ignored attributes and the netlist reader's notes (an undefined
-  model drawn as NPN, a skipped library, `K` coupling) in the developer console.
+| Setting | What it does |
+| --- | --- |
+| **Dialect** | The dialect for blocks without a `dialect` option. ngspice by default. |
+| **Layout timeout** | How long laying out a schematic may take before it's shown as an error. 3 seconds by default, from 0.5 to 60. |
+| **Follow dark themes** | On by default. Turn off to keep every schematic on a white card. |
+| **Debug logging** | Writes ignored options and notes from the netlist reader, such as an undefined transistor model, to the developer console. |
 
 ## Commands
 
-- **Refresh included files**
-- **Show every schematic in this note**
-- **Restart renderer**
+| Command | What it does |
+| --- | --- |
+| **Refresh included files** | Reads every included file again and redraws every schematic. |
+| **Show every schematic in this note** | Switches every block in the note back from netlist to schematic. |
+| **Restart renderer** | Starts the schematic engine afresh and redraws open notes. |
 
-## How it renders
+## When something goes wrong
 
-Rendering runs in a Web Worker inside Obsidian, built from spice-renderer: the seven dialect
-parsers compiled to WebAssembly, the Eclipse Layout Kernel (elkjs) and the SVG drawing. The
-library's `prepare` step runs in the same worker; the files it asks for are read on the main
-thread through Obsidian's vault API (`src/vault-reader.ts`); `main.js` uses no Node module. Nothing is downloaded,
-installed or written to disk; the worker is embedded in `main.js` (about 2.5 MB, 0.76 MB
-gzipped).
+- **A mistake in the netlist:** the error appears in place of the schematic, quoting the line with
+  a caret under the problem.
+- **"Took longer than…":** the layout hit the **Layout timeout**. Densely connected circuits of a
+  few hundred parts may need more time; raise the limit in settings.
+- **Size limits:** a netlist may have up to 400 elements and 64,000 characters. An included file
+  may be up to 8 MB, and a block may include up to 32 files and 16 MB in all.
 
-The worker starts with the first schematic drawn, so a vault without spice blocks never loads ELK
-or the parsers; included files are watched from the start. Schematics also draw in embedded notes,
-hover previews, Canvas cards and exported PDFs (in light colours). Settings appear in Obsidian's
-settings search, the dialect as a dropdown. On an Obsidian whose built-in
-Chromium predates `light-dark()`, schematics keep the white card in dark themes.
+## Privacy
 
-Desktop only for now.
+Schematics are drawn on your device, inside Obsidian. The plugin doesn't connect to the internet
+and doesn't collect any data. It reads only the files your netlists include, and only from your
+vault, through Obsidian. It never writes files.
 
-## Development
+## Credits
 
-Requires Node 22 or newer (see `.nvmrc`).
+Schematics are laid out by the [Eclipse Layout Kernel](https://www.eclipse.org/elk/) through
+[elkjs](https://github.com/kieler/elkjs), with symbols from [netlistsvg](https://github.com/nturley/netlistsvg).
+The licenses of the software built into this plugin are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-~~~sh
-npm ci
-npm run lint        # tsc --noEmit
-npm test            # node --test: attributes, toggle, scanner, DOM, caches, includes, host, stubs, and the real worker bundle
-npm run build       # main.js, with the worker bundle embedded
-npm run vault       # link this repo into ../test-vault as an enabled plugin, examples in spice/
-npm run test:live   # a real Obsidian with a throwaway profile and vault, driven over CDP
-~~~
-
-`npm run test:live` needs Obsidian installed (`OBSIDIAN_EXECUTABLE` overrides the path); it
-prints where it saved light and dark screenshots. `examples/view-toggle.md` is its fixture and
-includes `examples/models/opamp.inc`.
-
-The renderer is pinned to a release tarball in `package.json` (`.npmrc` sets
-`allow-remote=root` for npm 12). To take a new release, edit the URL, run `npm install`, check
-`src/worker/entry.ts` against the release's `src/worker.ts` and `src/worker/parser-modules.ts`
-against its `src/parser/modules.ts`, and run the tests.
-
-## License
-
-MIT for this plugin. `main.js` embeds spice-renderer (MIT), whose parsers carry flex, Bison and
-Emscripten code and whose symbols and layout code are adapted from netlistsvg (MIT), elkjs
-(EPL-2.0) and @xmldom/xmldom (MIT); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Released under the [MIT License](LICENSE). To build or change the plugin, see
+[DEVELOPMENT.md](DEVELOPMENT.md).
