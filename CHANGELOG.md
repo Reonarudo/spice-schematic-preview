@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 (2026-11-06)
+
+- The BOM table style and **Follow dark themes** are applied to the main window's document by name
+  rather than through the global `document`, as Obsidian's review linter asks. No change in behaviour.
+
 ## 0.2.0 (2026-11-06)
 
 - **The BOM view.** In Reading view a second button beside **</>** shows a block's parts as a

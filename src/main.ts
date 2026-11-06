@@ -145,8 +145,10 @@ export default class SpicePlugin extends Plugin {
       this.toggles.rename(oldPath, file.path);
     }));
 
-    this.docs.add(document);
-    this.applyTheme(document);
+    // The main window's document; pop-outs arrive through `window-open`.
+    const main = this.app.workspace.containerEl.doc;
+    this.docs.add(main);
+    this.applyTheme(main);
     this.registerEvent(this.app.workspace.on('window-open', (win) => {
       this.docs.add(win.doc);
       this.applyTheme(win.doc);
