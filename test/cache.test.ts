@@ -6,7 +6,7 @@ import type { Prepared, RenderResult } from '@reonarudo/spice-renderer';
 import { createResults } from '../src/cache';
 
 const input = (n: number, source = 'R1 a 0 1k'): Prepared => ({ source, dialect: 'ngspice', files: [], identity: String(n).padStart(64, '0') });
-const ok: RenderResult = { status: 'success', output: '<svg/>', notes: [] };
+const ok: RenderResult = { status: 'success', output: '<svg/>', bom: [], notes: [] };
 
 test('renders once per identity, sharing a render still in flight', async () => {
   let calls = 0;
@@ -49,7 +49,7 @@ test('the least recently used identity is evicted first', async () => {
 
 test('the netlist reader\'s notes are logged once per fresh render, labelled with the first line', async () => {
   const logged: string[] = [];
-  const results = createResults(async () => ({ status: 'success', output: '<svg/>', notes: ['Line 1: model BC547 of Q1 is not defined here; drawn as NPN.'] }), (line) => logged.push(line));
+  const results = createResults(async () => ({ status: 'success', output: '<svg/>', bom: [], notes: ['Line 1: model BC547 of Q1 is not defined here; drawn as NPN.'] }), (line) => logged.push(line));
   await results.render(input(1, 'Q1 c b e BC547\nR1 c 0 1k'));
   await results.render(input(1, 'Q1 c b e BC547\nR1 c 0 1k'));
   await results.render(input(2, `* ${'x'.repeat(80)}\nR1 a 0 1`));
@@ -57,4 +57,17 @@ test('the netlist reader\'s notes are logged once per fresh render, labelled wit
     'Q1 c b e BC547: Line 1: model BC547 of Q1 is not defined here; drawn as NPN.',
     `* ${'x'.repeat(57)}…: Line 1: model BC547 of Q1 is not defined here; drawn as NPN.`
   ]);
+});
+
+test('notes are logged from a timeout or a failure that carries them, and from nothing else', async () => {
+  const logged: string[] = [];
+  const outcomes: Record<string, RenderResult> = {
+    t: { status: 'timeout', budget: 100, bom: [], notes: ['timed'] },
+    f: { status: 'failure', message: 'The schematic could not be laid out (x).', bom: [], notes: ['failed'] },
+    p: { status: 'failure', message: 'D1 needs 2 nodes; found 1.' },
+    u: { status: 'unavailable', reason: 'gone' }
+  };
+  const results = createResults(async (prepared) => outcomes[prepared.source]!, (line) => logged.push(line));
+  for (const [n, source] of ['t', 'f', 'p', 'u'].entries()) await results.render(input(n, source));
+  assert.deepEqual(logged, ['t: timed', 'f: failed']);
 });

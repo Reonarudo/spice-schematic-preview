@@ -24,7 +24,7 @@ VCC vcc 0 5
 - Six SPICE dialects: ngspice, LTspice, PSpice, HSPICE, Xyce and Spectre.
 - Model libraries and subcircuits from files in your vault, through `.include` and `.lib`.
 - Captions, alignment and alt text for each schematic.
-- A button to see a netlist without leaving Reading view.
+- A button to see a netlist without leaving Reading view, and one to see its parts as a table.
 - Follows your theme: schematics stay readable in dark themes.
 - Works offline.
 
@@ -133,6 +133,32 @@ six.
 - **Live Preview:** select Obsidian's own **Edit this block** button, just as for a Mermaid
   diagram.
 
+## The BOM view
+
+In Reading view, the button beside **</>** shows a block's parts as a table, a bill of materials
+(BOM). Identical parts share a row with their quantity and references. Select it again to see the
+schematic. Like a netlist view, a BOM view is remembered, and **Show every schematic in this
+note** switches it back.
+
+| Qty | References | Type | Value |
+| --: | --- | --- | --- |
+| 1 | VAC | voltage source | SIN(0 12 50) |
+| 4 | D1, D2, D3, D4 | diode | 1N4007 |
+| 1 | C1 | capacitor | 1000u |
+| 1 | RL | resistor | 1k |
+
+- Parts are identical when their type, subcircuit name and everything written after their nodes
+  match, ignoring case and extra spaces. `10k` and `10K` share a row; `10k` and `10000` don't.
+- A multiplier such as `m=2` stays in the **Value** column and doesn't change the quantity.
+- Parts from included files join the table, with a **File** column naming the file.
+- Parts inside a `.subckt` definition aren't listed, as they aren't drawn.
+- If a schematic takes too long to lay out, its table still appears. If the netlist has a
+  mistake, the table says so instead.
+
+Choose how the table looks with **BOM table style**: **Plain** uses your theme's table styling,
+**Compact** is a dense full-width table, and **Card** puts the table on the schematic's card with
+a part count.
+
 ## Dark and light themes
 
 Schematics follow your theme. In a dark theme, wires, symbols and labels take your theme's text
@@ -147,7 +173,8 @@ settings.
 | --- | --- |
 | **Dialect** | The dialect for blocks without a `dialect` option. ngspice by default. |
 | **Layout timeout** | How long laying out a schematic may take before it's shown as an error. 3 seconds by default, from 0.5 to 60. |
-| **Follow dark themes** | On by default. Turn off to keep every schematic on a white card. |
+| **Follow dark themes** | On by default. Turn off to keep every schematic, and the Card table, on a white card. |
+| **BOM table style** | How the BOM view's table looks: Plain (the default), Compact or Card. |
 | **Debug logging** | Writes ignored options and notes from the netlist reader, such as an undefined transistor model, to the developer console. |
 
 ## Commands
@@ -155,7 +182,7 @@ settings.
 | Command | What it does |
 | --- | --- |
 | **Refresh included files** | Reads every included file again and redraws every schematic. |
-| **Show every schematic in this note** | Switches every block in the note back from netlist to schematic. |
+| **Show every schematic in this note** | Switches every block in the note back to its schematic, from its netlist or its BOM view. |
 | **Restart renderer** | Starts the schematic engine afresh and redraws open notes. |
 
 ## When something goes wrong

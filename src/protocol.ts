@@ -1,4 +1,4 @@
-import type { IncludedFile, Prepared, RenderResult } from '@reonarudo/spice-renderer';
+import type { BomRow, IncludedFile, Prepared, RenderResult } from '@reonarudo/spice-renderer';
 
 /**
  * Messages between the plugin and its render worker (docs/adr/0001-runtime-host.md).
@@ -54,6 +54,22 @@ export type PreparedReply =
   | { type: 'prepared'; id: number; prepared: Prepared }
   | { type: 'prepared'; id: number; error: string };
 
+/**
+ * The parsed stage of render request `id`: the BOM rows and the reader's notes, posted once the
+ * netlist is read and before layout begins, so a render the host abandons as a timeout still has
+ * them (docs/bom-view-spec.md section 10.2 in spice-markdown-preview).
+ */
+export interface Parsed extends ParsedStage {
+  type: 'parsed';
+  id: number;
+}
+
+/** A render's parsed stage without the message envelope: what `renderNetlist` hands `onParsed`. */
+export interface ParsedStage {
+  bom: BomRow[];
+  notes: string[];
+}
+
 /** The worker's answer to a render request, and whether its engine must not be used again. */
 export interface Reply {
   type: 'reply';
@@ -62,4 +78,4 @@ export interface Reply {
   discard?: true;
 }
 
-export type WorkerMessage = Started | ReadRequest | PreparedReply | Reply;
+export type WorkerMessage = Started | ReadRequest | PreparedReply | Parsed | Reply;

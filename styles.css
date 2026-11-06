@@ -74,37 +74,46 @@ body.theme-dark.spice-follow-dark svg.spice {
   font-style: italic;
 }
 
-/* ---- The view toggle. ----
-   Reading view: a button dressed as Obsidian's own "Edit this block" button (the one Mermaid and
-   every rendered code block get in Live Preview): same corner, size, colours and hover fade.
-   Live Preview: hidden, and the block always shows its schematic; Obsidian's button opens the
-   fence for editing, exactly as for Mermaid. */
+/* ---- The view toggle and the BOM button. ----
+   Reading view: two buttons dressed as Obsidian's own "Edit this block" button (the one Mermaid
+   and every rendered code block get in Live Preview): same size, colours and hover fade, the
+   toggle in that button's corner and the BOM button beside it. Three views, one attribute:
+   data-view absent (rendering), "source" or "bom"; exactly one slot shows.
+   Live Preview: both hidden, and the block always shows its schematic; Obsidian's button opens
+   the fence for editing, exactly as for Mermaid. */
 
 .spice-fence {
   position: relative;
 }
 
-/* Keep the button's corner clear, so it never sits on a schematic. */
+/* Keep the buttons' corner clear, so neither ever sits on a schematic or a long source line. */
 .spice-fence > .spice-rendering {
-  padding-inline-end: 36px;
+  padding-inline-end: 68px;
 }
 
-.spice-fence > pre {
+.spice-fence > pre,
+.spice-fence > .spice-bom {
   display: none;
 }
 
-.spice-fence[data-view="source"] > .spice-rendering {
+.spice-fence[data-view="source"] > .spice-rendering,
+.spice-fence[data-view="bom"] > .spice-rendering {
   display: none;
 }
 
 .spice-fence[data-view="source"] > pre {
   display: block;
   margin: 0;
-  padding-inline-end: 44px;
+  padding-inline-end: 76px;
   overflow-x: auto;
 }
 
-.spice-fence > .spice-toggle {
+.spice-fence[data-view="bom"] > .spice-bom {
+  display: block;
+}
+
+.spice-fence > .spice-toggle,
+.spice-fence > .spice-bom-button {
   position: absolute;
   inset-block-start: var(--size-2-2, 4px);
   inset-inline-end: var(--size-2-2, 4px);
@@ -125,21 +134,31 @@ body.theme-dark.spice-follow-dark svg.spice {
   z-index: 1;
 }
 
+/* One button width plus the gap inline-start of the toggle, which never moves. */
+.spice-fence > .spice-bom-button {
+  inset-inline-end: calc(var(--size-2-2, 4px) * 2 + 28px);
+}
+
 .spice-fence:hover > .spice-toggle,
-.spice-fence > .spice-toggle:focus-visible {
+.spice-fence > .spice-toggle:focus-visible,
+.spice-fence:hover > .spice-bom-button,
+.spice-fence > .spice-bom-button:focus-visible {
   opacity: 1;
 }
 
-.spice-fence > .spice-toggle:hover {
+.spice-fence > .spice-toggle:hover,
+.spice-fence > .spice-bom-button:hover {
   background: var(--background-modifier-hover);
   color: var(--icon-color-hover, var(--icon-color));
 }
 
-.spice-fence > .spice-toggle:focus-visible {
+.spice-fence > .spice-toggle:focus-visible,
+.spice-fence > .spice-bom-button:focus-visible {
   box-shadow: 0 0 0 2px var(--background-modifier-border-focus, var(--interactive-accent));
 }
 
-.spice-toggle svg {
+.spice-toggle svg,
+.spice-bom-button svg {
   width: var(--icon-size, 16px);
   height: var(--icon-size, 16px);
   stroke-width: var(--icon-stroke, 2px);
@@ -158,20 +177,173 @@ body.theme-dark.spice-follow-dark svg.spice {
   display: inline;
 }
 
-/* Live Preview: Obsidian's own button is the control, and a flip made in Reading view does not
-   apply; the corner is left to Obsidian. */
-.markdown-source-view .spice-fence > .spice-toggle {
+/* The BOM button: list everywhere but in BOM view, the way back there. */
+.spice-bom-button .spice-icon-graph {
   display: none;
 }
 
-.markdown-source-view .spice-fence[data-view="source"] > .spice-rendering {
+.spice-fence[data-view="bom"] .spice-bom-button .spice-icon-list {
+  display: none;
+}
+
+.spice-fence[data-view="bom"] .spice-bom-button .spice-icon-graph {
+  display: inline;
+}
+
+/* Live Preview: Obsidian's own button is the control, and a flip made in Reading view, to source
+   or to BOM, does not apply; the corner is left to Obsidian. */
+.markdown-source-view .spice-fence > .spice-toggle,
+.markdown-source-view .spice-fence > .spice-bom-button {
+  display: none;
+}
+
+.markdown-source-view .spice-fence[data-view="source"] > .spice-rendering,
+.markdown-source-view .spice-fence[data-view="bom"] > .spice-rendering {
   display: block;
 }
 
-.markdown-source-view .spice-fence[data-view="source"] > pre {
+.markdown-source-view .spice-fence[data-view="source"] > pre,
+.markdown-source-view .spice-fence[data-view="bom"] > .spice-bom {
   display: none;
 }
 
 .markdown-source-view .spice-fence > .spice-rendering {
   padding-inline-end: 0;
+}
+
+/* ---- The BOM view (spice-markdown-preview's docs/bom-view-spec.md, sections 4, 7 and 10). ----
+   The table's look is the "BOM table style" setting, a body class: body.spice-bom-plain,
+   body.spice-bom-compact or body.spice-bom-card, so a change restyles every block without a redraw. */
+
+.spice-bom-empty {
+  padding: .5em 1em;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.spice-bom-summary {
+  display: none;
+}
+
+.spice-bom-table .spice-bom-qty {
+  text-align: end;
+}
+
+/* plain: Obsidian's own table, level with the buttons. A table wider than the column minus the two
+   buttons wraps earlier instead of running under them; a single unbreakable token wider than
+   that still overflows (accepted). */
+body.spice-bom-plain .spice-bom-table {
+  max-width: calc(100% - 72px);
+}
+
+/* compact: a dense full-width table of our own, below the buttons' row. */
+body.spice-bom-compact .spice-bom {
+  padding-block-start: calc(var(--size-2-2, 4px) * 2 + 24px);
+}
+
+body.spice-bom-compact .spice-bom-table {
+  width: 100%;
+  margin: 0;
+  font-size: var(--font-smaller, .875em);
+  border: 1px solid var(--background-modifier-border);
+  border-collapse: collapse;
+}
+
+body.spice-bom-compact .spice-bom-table th {
+  font-size: .85em;
+  font-weight: var(--font-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+  border: none;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  padding: 3px 10px;
+}
+
+body.spice-bom-compact .spice-bom-table td {
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+  padding: 3px 10px;
+  vertical-align: top;
+}
+
+body.spice-bom-compact .spice-bom-table .spice-bom-refs,
+body.spice-bom-compact .spice-bom-table .spice-bom-value,
+body.spice-bom-compact .spice-bom-table .spice-bom-file {
+  font-family: var(--font-monospace);
+}
+
+body.spice-bom-compact .spice-bom-table .spice-bom-type {
+  white-space: nowrap;
+}
+
+/* card: the table on the schematic's white card, the summary line first on the buttons' row. It
+   follows "Follow dark themes" as the schematic does: white in a light theme or with it off. */
+body.spice-bom-card .spice-bom {
+  background: #fff;
+  color: #000;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+body.spice-bom-card .spice-bom-summary {
+  display: block;
+  margin: 0 0 .5em;
+  padding-inline-end: 64px;
+  line-height: 24px;
+  color: #555;
+}
+
+body.spice-bom-card .spice-bom-table {
+  width: 100%;
+  margin: 0;
+  border-collapse: collapse;
+}
+
+body.spice-bom-card .spice-bom-table th,
+body.spice-bom-card .spice-bom-table td {
+  border: none;
+  background: none;
+  color: inherit;
+  vertical-align: top;
+}
+
+body.spice-bom-card .spice-bom-table th {
+  border-bottom: 1px solid #999;
+  color: #000;
+}
+
+body.spice-bom-card .spice-bom-table td {
+  border-top: 1px solid #ddd;
+}
+
+body.spice-bom-card .spice-bom-table .spice-bom-refs,
+body.spice-bom-card .spice-bom-table .spice-bom-value,
+body.spice-bom-card .spice-bom-table .spice-bom-file {
+  font-family: var(--font-monospace);
+}
+
+body.spice-bom-card .spice-bom-empty {
+  color: #555;
+}
+
+body.theme-dark.spice-follow-dark.spice-bom-card .spice-bom {
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+}
+
+body.theme-dark.spice-follow-dark.spice-bom-card .spice-bom-summary,
+body.theme-dark.spice-follow-dark.spice-bom-card .spice-bom-empty {
+  color: var(--text-muted);
+}
+
+body.theme-dark.spice-follow-dark.spice-bom-card .spice-bom-table th {
+  color: var(--text-normal);
+  border-bottom-color: var(--background-modifier-border);
+}
+
+body.theme-dark.spice-follow-dark.spice-bom-card .spice-bom-table td {
+  border-top-color: var(--background-modifier-border);
 }

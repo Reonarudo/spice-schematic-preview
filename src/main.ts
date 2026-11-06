@@ -7,11 +7,11 @@ import { parseAttributes, type FenceAttributes } from './attributes';
 import { createResults, type Results } from './cache';
 import type { RenderResult } from '@reonarudo/spice-renderer';
 import { drawBlock } from './block';
-import { BASE_CLASS, buildFence, fenceKey, isSourceView, setView } from './fence';
+import { BASE_CLASS, buildFence, fenceKey, nextView, setView, viewOf, type View } from './fence';
 import { createHost, type Host, type WorkerLike } from './host';
 import { IncludeFiles } from './include-files';
 import { locate, scanFences } from './info';
-import { DEFAULT_SETTINGS, SpiceSettingTab, readSettings, type Settings } from './settings';
+import { BOM_STYLES, DEFAULT_SETTINGS, SpiceSettingTab, readSettings, type BomStyle, type Settings } from './settings';
 import { ToggleStore } from './toggle';
 import { vaultFileReader } from './vault-reader';
 
@@ -20,6 +20,9 @@ const WORD = BASE_CLASS;
 
 /** Body class that turns on the dark-theme colours in styles.css. */
 const FOLLOW_DARK_CLASS = `${BASE_CLASS}-follow-dark`;
+
+/** Body class naming the BOM table style: settings are vault-wide, so it is the body's, not each slot's. */
+const bomStyleClass = (style: BomStyle): string => `${BASE_CLASS}-bom-${style}`;
 
 /** Changes to included files are gathered this long before the blocks using them are drawn again. */
 const REDRAW_DELAY_MS = 100;
@@ -69,6 +72,8 @@ export default class SpicePlugin extends Plugin {
   private includes!: IncludeFiles;
   private workerUrl: string | undefined;
   private readonly drawn = new Set<Drawn>();
+  /** The main window's document and every pop-out's: where the body classes go. */
+  private readonly docs = new Set<Document>();
   private readonly stale = new Set<string>();
   private readonly saveSoon = debounce(() => void this.persist(), 200, true);
   private readonly redrawStale = debounce(() => {
@@ -115,7 +120,7 @@ export default class SpicePlugin extends Plugin {
         if (!file) return false;
         if (!checking) {
           this.toggles.clear(file.path);
-          for (const drawn of this.drawn) if (drawn.notePath === file.path) setView(drawn.wrapper, false);
+          for (const drawn of this.drawn) if (drawn.notePath === file.path) setView(drawn.wrapper, undefined);
         }
         return true;
       }
@@ -140,8 +145,13 @@ export default class SpicePlugin extends Plugin {
       this.toggles.rename(oldPath, file.path);
     }));
 
+    this.docs.add(document);
     this.applyTheme(document);
-    this.registerEvent(this.app.workspace.on('window-open', (win) => this.applyTheme(win.doc)));
+    this.registerEvent(this.app.workspace.on('window-open', (win) => {
+      this.docs.add(win.doc);
+      this.applyTheme(win.doc);
+    }));
+    this.registerEvent(this.app.workspace.on('window-close', (win) => this.docs.delete(win.doc)));
   }
 
   onunload(): void {
@@ -150,7 +160,7 @@ export default class SpicePlugin extends Plugin {
     this.host = undefined;
     this.results = undefined;
     if (this.workerUrl) URL.revokeObjectURL(this.workerUrl);
-    document.body.classList.remove(FOLLOW_DARK_CLASS);
+    for (const doc of this.docs) doc.body.classList.remove(FOLLOW_DARK_CLASS, ...BOM_STYLES.map(bomStyleClass));
     void this.persist();
   }
 
@@ -160,7 +170,8 @@ export default class SpicePlugin extends Plugin {
     await this.persist();
     if (change.layoutTimeout !== undefined && change.layoutTimeout !== before.layoutTimeout) this.restart();
     else if (change.dialect !== undefined && change.dialect !== before.dialect) this.redrawAll();
-    if (change.followDarkTheme !== undefined) this.applyTheme(document);
+    // Body classes only: the stylesheet restyles every block, with no redraw.
+    if (change.followDarkTheme !== undefined || change.bomStyle !== undefined) for (const doc of this.docs) this.applyTheme(doc);
   }
 
   private async persist(): Promise<void> {
@@ -200,6 +211,7 @@ export default class SpicePlugin extends Plugin {
 
   private applyTheme(doc: Document): void {
     doc.body.classList.toggle(FOLLOW_DARK_CLASS, this.settings.followDarkTheme);
+    for (const style of BOM_STYLES) doc.body.classList.toggle(bomStyleClass(style), style === this.settings.bomStyle);
   }
 
   private log(message: string): void {
@@ -224,7 +236,7 @@ export default class SpicePlugin extends Plugin {
           if (this.unloaded) return { status: 'unavailable', reason: 'the renderer was stopped' };
           return this.renderer().results.render(prepared.prepared);
         });
-      await drawBlock(parts.rendering, outcome, {
+      await drawBlock(parts, outcome, {
         attributes,
         source,
         current: () => child.live && mine === generation,
@@ -237,7 +249,7 @@ export default class SpicePlugin extends Plugin {
       wrapper: parts.wrapper,
       sync: async () => {
         const now = await this.place(source, el, ctx);
-        if (now.keys && now.index !== undefined) setView(parts.wrapper, this.toggles.isFlipped(ctx.sourcePath, now.keys, now.index));
+        if (now.keys && now.index !== undefined) setView(parts.wrapper, this.toggles.viewOf(ctx.sourcePath, now.keys, now.index));
       },
       redraw: () => void draw()
     };
@@ -245,32 +257,37 @@ export default class SpicePlugin extends Plugin {
     ctx.addChild(child);
     this.drawn.add(drawn);
 
-    child.registerDomEvent(parts.button, 'mousedown', (event) => {
-      // In Live Preview a click inside the block would move the cursor into it and swap the
-      // widget for its Markdown; the toggle is a reader's control, so it keeps the widget.
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    child.registerDomEvent(parts.button, 'click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const flipped = !isSourceView(parts.wrapper);
-      setView(parts.wrapper, flipped);
-      // Placed again on click: the note may have changed since this block was drawn.
-      void this.place(source, el, ctx).then((now) => {
-        if (!now.keys || now.index === undefined) return;
-        this.toggles.set(ctx.sourcePath, now.keys, now.index, flipped);
-        // The note's other views (Reading view kept beside Live Preview, a split, a pop-out) follow.
-        for (const other of this.drawn) if (other !== drawn && other.notePath === ctx.sourcePath) void other.sync();
+    const listen = (button: HTMLButtonElement, view: View): void => {
+      child.registerDomEvent(button, 'mousedown', (event) => {
+        // In Live Preview a click inside the block would move the cursor into it and swap the
+        // widget for its Markdown; the buttons are a reader's controls, so they keep the widget.
+        event.preventDefault();
+        event.stopPropagation();
       });
-    });
+      child.registerDomEvent(button, 'click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const next = nextView(viewOf(parts.wrapper), view);
+        setView(parts.wrapper, next);
+        // Placed again on click: the note may have changed since this block was drawn.
+        void this.place(source, el, ctx).then((now) => {
+          if (!now.keys || now.index === undefined) return;
+          this.toggles.set(ctx.sourcePath, now.keys, now.index, next);
+          // The note's other views (Reading view kept beside Live Preview, a split, a pop-out) follow.
+          for (const other of this.drawn) if (other !== drawn && other.notePath === ctx.sourcePath) void other.sync();
+        });
+      });
+    };
+    listen(parts.toggle, 'source');
+    listen(parts.bomButton, 'bom');
 
     placement = await this.place(source, el, ctx);
     if (!child.live) return;
     for (const diagnostic of placement.diagnostics) this.log(`${ctx.sourcePath}: ${diagnostic}`);
     if (placement.keys && placement.index !== undefined) {
       parts.wrapper.setAttribute('data-fence-key', placement.keys[placement.index]!);
-      if (this.toggles.isFlipped(ctx.sourcePath, placement.keys, placement.index)) setView(parts.wrapper, true);
+      const view = this.toggles.viewOf(ctx.sourcePath, placement.keys, placement.index);
+      if (view) setView(parts.wrapper, view);
     }
     await draw();
   }

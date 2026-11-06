@@ -10,17 +10,18 @@ import { loadSymbols } from '#renderer/dist/schematic.js';
 import { parserLoader } from '#renderer/dist/parser/modules.js';
 import SYMBOLS from '#renderer/dist/skin/symbols.svg';
 import type { FileReader } from '@reonarudo/spice-renderer';
-import type { PreparedReply, Reply, Request, ReadRequest, RenderRequest, Started } from '../protocol';
+import type { Parsed, ParsedStage as Stage, PreparedReply, Reply, Request, ReadRequest, RenderRequest, Started } from '../protocol';
 
 interface Scope {
   onmessage: ((event: { data: Request }) => void) | null;
-  postMessage(message: Started | Reply | PreparedReply | ReadRequest): void;
+  postMessage(message: Started | Reply | PreparedReply | Parsed | ReadRequest): void;
 }
 const scope = self as unknown as Scope;
 
 type Result = Omit<Reply, 'type' | 'id'>['result'] & { discard?: true };
 type Layout = Parameters<typeof renderNetlist>[2];
 type Includes = NonNullable<Parameters<typeof renderNetlist>[3]>;
+type Render = (request: Omit<RenderRequest, 'type' | 'id'>, onParsed?: (stage: Stage) => void) => Promise<Result>;
 
 /** An ngspice netlist that touches every common symbol, drawn before the worker reports ready. */
 const WARM_UP = 'V1 in 0 1\nR1 in out 1k\nC1 out 0 1u\nQ1 out in 0 npn\nM1 out in 0 0 nmos\nX1 in out box';
@@ -44,13 +45,17 @@ function createElk(): InstanceType<typeof ELK> {
   }
 }
 
-async function start(): Promise<(request: Omit<RenderRequest, 'type' | 'id'>) => Promise<Result>> {
+async function start(): Promise<Render> {
   const symbols = loadSymbols(SYMBOLS);
   const elk = createElk();
   const layout: Layout = (graph) => elk.layout(graph);
   const loadParser = parserLoader('');
 
-  const render = async ({ source, dialect, files, outputBytes }: Omit<RenderRequest, 'type' | 'id'>): Promise<Result> => {
+  /**
+   * Draw one request. `onParsed` hears the parsed stage before layout begins; a failure after it
+   * (ELK threw, the output limit) carries the stage inline, as the library's worker does.
+   */
+  const render: Render = async ({ source, dialect, files, outputBytes }, onParsed) => {
     try {
       await loadParser(dialect);
     } catch {
@@ -59,13 +64,17 @@ async function start(): Promise<(request: Omit<RenderRequest, 'type' | 'id'>) =>
     const includes: Includes = {
       files: Object.fromEntries(files.map((file) => [file.key, 'text' in file ? file.text : { error: file.error }]))
     };
-    const result = await renderNetlist(source, symbols, layout, includes, dialect);
+    let stage: Stage | undefined;
+    const result = await renderNetlist(source, symbols, layout, includes, dialect, (parsed) => {
+      stage = parsed;
+      onParsed?.(parsed);
+    });
     if (result.status === 'failure') {
       // The netlist reader counts columns from 0; the contract counts them from 1.
       return result.column === undefined ? result : { ...result, column: result.column + 1 };
     }
     if (result.status === 'success' && new TextEncoder().encode(result.output).length > outputBytes) {
-      return { status: 'failure', message: `SPICE output exceeds the ${outputBytes}-byte limit` };
+      return { status: 'failure', message: `SPICE output exceeds the ${outputBytes}-byte limit`, ...(stage ?? {}) };
     }
     return result;
   };
@@ -114,10 +123,18 @@ start().then((render) => {
       }
       case 'render': {
         const { id, ...request } = data;
-        render(request).then(
+        // Posted before layout, so the plugin still has the rows and notes if it abandons this render.
+        let stage: Stage | undefined;
+        render(request, (parsed) => {
+          stage = parsed;
+          scope.postMessage({ type: 'parsed', id, ...parsed });
+        }).then(
           ({ discard, ...result }) => scope.postMessage(discard ? { type: 'reply', id, result, discard } : { type: 'reply', id, result }),
-          // An unexpected error may leave a parser's wasm instance unusable; the plugin discards this worker.
-          () => scope.postMessage({ type: 'reply', id, result: { status: 'failure', message: 'the SPICE renderer stopped unexpectedly' }, discard: true })
+          // An unexpected error may leave a parser's wasm instance unusable; the plugin discards this
+          // worker. The parsed stage, when it was reached, rides along.
+          () => scope.postMessage({
+            type: 'reply', id, result: { status: 'failure', message: 'the SPICE renderer stopped unexpectedly', ...(stage ?? {}) }, discard: true
+          })
         );
       }
     }

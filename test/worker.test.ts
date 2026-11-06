@@ -5,9 +5,15 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
-import { prepare as nodePrepare, type FileReader, type Prepared, type RenderResult } from '@reonarudo/spice-renderer';
-import { bundleWorker } from '../scripts/worker-bundle.mjs';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { prepare as nodePrepare, type BomRow, type FileReader, type Prepared, type RenderResult } from '@reonarudo/spice-renderer';
+import { renderNetlist } from '#renderer/dist/draw-netlist.js';
+import { parserLoader } from '#renderer/dist/parser/modules.js';
+import { loadSymbols } from '#renderer/dist/schematic.js';
+import { bundleWorker, rendererDir } from '../scripts/worker-bundle.mjs';
 import { createHost, type Host, type WorkerLike } from '../src/host';
+import type { WorkerMessage } from '../src/protocol';
 import { describe } from '../src/fence';
 import { fence } from './helpers';
 
@@ -28,8 +34,12 @@ Object.defineProperty(globalThis, 'onmessage', {
 let source: string;
 let host: Host;
 
+/** Every message the bundle posted, across the workers spawned, in order. */
+const heard: WorkerMessage[] = [];
+
 function spawn(): WorkerLike {
   const worker = new Worker(PRELUDE + source, { eval: true });
+  worker.on('message', (data: WorkerMessage) => heard.push(data));
   const like: WorkerLike = {
     onmessage: null,
     onerror: null,
@@ -130,12 +140,17 @@ test('every dialect\'s parser loads in the worker, Spectre with its SPICE mode',
 });
 
 test('timeouts are reported with the budget, and the next fence gets a fresh worker', async () => {
-  const quick = createHost(spawn, { timeout: 100 });
+  // The mesh reads in tens of milliseconds and lays out in seconds: a 1 s budget always lands between.
+  const quick = createHost(spawn, { timeout: 1000 });
   try {
     const slow = Array.from({ length: 200 }, (_, i) => `R${i} n${i % 37} n${(i * 7 + 3) % 41} 1k`).join('\n');
     const result = await draw(slow, 'ngspice', files(), quick);
-    assert.deepEqual(result, { status: 'timeout', budget: 100 });
-    assert.match(describe(result as Exclude<RenderResult, { status: 'success' }>, slow), /^Layout took longer than 0\.1 s/);
+    // The netlist was read before layout overran: the timeout keeps its rows (one row of 200 resistors).
+    assert.equal(result.status, 'timeout');
+    assert.equal(result.status === 'timeout' && result.budget, 1000);
+    assert.deepEqual(result.status === 'timeout' && result.bom?.map((row) => [row.name, row.value, row.references.length]), [['resistor', '1k', 200]]);
+    assert.deepEqual(result.status === 'timeout' && result.notes, []);
+    assert.match(describe(result as Exclude<RenderResult, { status: 'success' }>, slow), /^Layout took longer than 1 s/);
     assert.equal((await draw('R1 a 0 1k', 'ngspice', files(), quick)).status, 'success');
   } finally {
     quick.dispose();
@@ -156,4 +171,63 @@ test('ten concurrent fences each get their own schematic', async () => {
     assert.equal(result.status, 'success');
     assert.match(result.status === 'success' ? result.output : '', new RegExp(`>R${i}<`));
   });
+});
+
+/**
+ * The rows the library's own, unbundled code gives under Node for a prepared fence. The library's
+ * runtime cannot start here (this suite's `window` global reaches its worker thread, and ELK then
+ * takes its browser path), so its `renderNetlist` runs in this thread with a layout that stops
+ * at once: a layout failure after the parse carries the rows.
+ */
+async function nodeRows(prepared: Prepared): Promise<BomRow[] | undefined> {
+  await parserLoader(join(rendererDir, 'vendor', 'parsers'))(prepared.dialect as never);
+  const symbols = loadSymbols(readFileSync(join(rendererDir, 'dist', 'skin', 'symbols.svg'), 'utf8'));
+  const files = Object.fromEntries(prepared.files.map((file) => [file.key, 'text' in file ? file.text : { error: file.error }]));
+  const result = await renderNetlist(prepared.source, symbols, () => { throw new Error('no layout'); }, { files }, prepared.dialect as never);
+  return result.status === 'failure' ? result.bom : undefined;
+}
+
+test('the bundle posts the parsed stage before its reply, in every dialect, with the rows Node gives', async () => {
+  for (const [dialect, body] of [
+    ['ngspice', 'D1 a 0 1N4007\nD2 b 0 1N4007\nR1 a b 1k'], ['ltspice', 'R1 a 0 1k\nR2 a 0 1K'], ['pspice', 'R1 a 0 1k\nC1 a 0 1u'],
+    ['hspice', 'R1 a 0 1k M=2\nR2 a 0 1k'], ['xyce', 'R1 a 0 1k\nL1 a 0 1m'],
+    ['spectre', 'r1 (a 0) resistor r=1k\nsimulator lang=spice\nR2 a 0 1k']
+  ] as const) {
+    const outcome = await host.prepare(body, dialect, files());
+    assert.equal(outcome.status, 'prepared', dialect);
+    if (outcome.status !== 'prepared') continue;
+    const from = heard.length;
+    const result = await host.render(outcome.prepared);
+    const mine = heard.slice(from).filter((message) => message.type === 'parsed' || message.type === 'reply');
+    assert.deepEqual(mine.map((message) => message.type), ['parsed', 'reply'], dialect);
+    const node = await nodeRows(await nodePrepare(body, { reader: files(), dialect }));
+    assert.equal(result.status, 'success', dialect);
+    if (result.status !== 'success') continue;
+    assert.ok(result.bom.length > 0, dialect);
+    assert.deepEqual(result.bom, node, dialect);
+    const parsed = mine[0];
+    assert.deepEqual(parsed?.type === 'parsed' && parsed.bom, node, dialect);
+  }
+});
+
+test('a netlist that does not read posts no parsed stage, and its failure carries no rows', async () => {
+  const from = heard.length;
+  const result = await draw('R1 a b 1k\nD1 a');
+  assert.equal(result.status, 'failure');
+  assert.equal(result.status === 'failure' && result.bom, undefined);
+  assert.equal(heard.slice(from).some((message) => message.type === 'parsed'), false);
+});
+
+test('the worked example with an include: the included row first, its file named, m=2 apart', async () => {
+  const result = await draw('.include "included/stage.cir"\nX1 inp inn vcc vee out LM358\nR1 out fb 1k m=2\nR2 fb 0 1k', 'ngspice',
+    files({ 'included/stage.cir': 'R7 c out 4k7\n' }));
+  assert.equal(result.status, 'success');
+  if (result.status !== 'success') return;
+  assert.deepEqual(result.bom, [
+    { type: 'resistor', name: 'resistor', value: '4k7', references: [{ ref: 'R7', line: 1, file: 'included/stage.cir' }] },
+    { type: 'subcircuit', name: 'subcircuit', title: 'LM358', value: '', references: [{ ref: 'X1', line: 2 }] },
+    { type: 'resistor', name: 'resistor', value: '1k m=2', references: [{ ref: 'R1', line: 3 }] },
+    { type: 'resistor', name: 'resistor', value: '1k', references: [{ ref: 'R2', line: 4 }] }
+  ]);
+  assert.equal(result.notes.length, 1);
 });

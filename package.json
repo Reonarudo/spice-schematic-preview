@@ -1,6 +1,6 @@
 {
   "name": "spice-schematic-preview",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": true,
   "description": "Obsidian plugin: draw SPICE netlists in spice code blocks as circuit schematics.",
   "license": "MIT",
@@ -15,7 +15,7 @@
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
   "dependencies": {
-    "@reonarudo/spice-renderer": "https://github.com/Reonarudo/spice-renderer/releases/download/v1.0.0/reonarudo-spice-renderer-1.0.0.tgz",
+    "@reonarudo/spice-renderer": "file:../../markdown-renderers/spice-renderer/reonarudo-spice-renderer-1.1.0.tgz",
     "elkjs": "0.12.0"
   },
   "devDependencies": {

@@ -2,6 +2,10 @@ import { PluginSettingTab, type App, type SettingDefinitionItem } from 'obsidian
 import { DEFAULT_DIALECT, DIALECT_NAMES } from '#renderer/dist/dialect.js';
 import type SpicePlugin from './main';
 
+/** How the BOM view's table is drawn, applied as a body class (styles.css). */
+export type BomStyle = 'plain' | 'compact' | 'card';
+export const BOM_STYLES: readonly BomStyle[] = ['plain', 'compact', 'card'];
+
 export interface Settings {
   /** The dialect `spice` fences are read in, unless a fence names its own with a `dialect` attribute. */
   dialect: string;
@@ -9,11 +13,13 @@ export interface Settings {
   layoutTimeout: number;
   /** In dark themes, draw schematics in their dark-theme colours (src/theme.ts), as Mermaid follows the theme; off keeps the white card. */
   followDarkTheme: boolean;
+  /** How the BOM view's table is drawn. */
+  bomStyle: BomStyle;
   /** Log ignored fence attributes and the netlist reader's notes to the developer console. */
   debug: boolean;
 }
 
-export const DEFAULT_SETTINGS: Settings = { dialect: DEFAULT_DIALECT, layoutTimeout: 3, followDarkTheme: true, debug: false };
+export const DEFAULT_SETTINGS: Settings = { dialect: DEFAULT_DIALECT, layoutTimeout: 3, followDarkTheme: true, bomStyle: 'plain', debug: false };
 
 export const TIMEOUT_RANGE = { min: 0.5, max: 60 } as const;
 
@@ -38,6 +44,7 @@ export function readSettings(stored: unknown): Settings {
       ? timeout
       : DEFAULT_SETTINGS.layoutTimeout,
     followDarkTheme: typeof value.followDarkTheme === 'boolean' ? value.followDarkTheme : DEFAULT_SETTINGS.followDarkTheme,
+    bomStyle: (BOM_STYLES as readonly unknown[]).includes(value.bomStyle) ? value.bomStyle as BomStyle : DEFAULT_SETTINGS.bomStyle,
     debug: typeof value.debug === 'boolean' ? value.debug : DEFAULT_SETTINGS.debug
   };
 }
@@ -57,11 +64,17 @@ const LABELS = {
     name: 'Follow dark themes',
     desc: 'In a dark theme, draw schematics on the page in dark-theme colours, as Mermaid diagrams follow the theme: lines and text lightened just enough to read, filled shapes darkened, hues kept. Turn off to keep every schematic on a white card with its exact colours.'
   },
+  bomStyle: {
+    name: 'BOM table style',
+    desc: 'How the BOM view\'s table is drawn. Plain uses the theme\'s own table styling; Compact is a dense full-width table; Card puts the table on the schematic\'s card with a summary line.'
+  },
   debug: {
     name: 'Debug logging',
     desc: 'Report ignored fence attributes and the netlist reader\'s notes (an undefined transistor model, a skipped library) in the developer console.'
   }
 } as const;
+
+const BOM_STYLE_OPTIONS: Record<BomStyle, string> = { plain: 'Plain (the default)', compact: 'Compact', card: 'Card' };
 
 /** The dialects as dropdown options: name to label. */
 const DIALECT_OPTIONS: Record<string, string> = Object.fromEntries(DIALECT_NAMES.map((name) => [name, DIALECT_LABELS[name] ?? name]));
@@ -84,6 +97,7 @@ export class SpiceSettingTab extends PluginSettingTab {
       { ...LABELS.dialect, control: { type: 'dropdown', key: 'dialect', options: DIALECT_OPTIONS, defaultValue: DEFAULT_SETTINGS.dialect } },
       { ...LABELS.layoutTimeout, control: { type: 'number', key: 'layoutTimeout', min: TIMEOUT_RANGE.min, max: TIMEOUT_RANGE.max, step: 'any', defaultValue: DEFAULT_SETTINGS.layoutTimeout, validate: checkTimeout } },
       { ...LABELS.followDarkTheme, control: { type: 'toggle', key: 'followDarkTheme', defaultValue: DEFAULT_SETTINGS.followDarkTheme } },
+      { ...LABELS.bomStyle, control: { type: 'dropdown', key: 'bomStyle', options: BOM_STYLE_OPTIONS, defaultValue: DEFAULT_SETTINGS.bomStyle } },
       { ...LABELS.debug, control: { type: 'toggle', key: 'debug', defaultValue: DEFAULT_SETTINGS.debug } }
     ];
   }

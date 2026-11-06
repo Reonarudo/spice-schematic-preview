@@ -1,6 +1,6 @@
 import type { FileReader, Prepared, RenderResult } from '@reonarudo/spice-renderer';
 import { DIALECT_NAMES } from '#renderer/dist/dialect.js';
-import type { FileAnswer, PreparedReply, ReadRequest, Reply, Request, Started, WorkerMessage } from './protocol';
+import type { FileAnswer, ParsedStage as Stage, PreparedReply, ReadRequest, Reply, Request, Started, WorkerMessage } from './protocol';
 
 /**
  * The render host: spice-renderer's `createRuntime`, ported from a blocking Node worker to an
@@ -8,6 +8,10 @@ import type { FileAnswer, PreparedReply, ReadRequest, Reply, Request, Started, W
  * checks and the wording of every result are the library's; what changed is that `render`
  * returns a promise, the worker answers by message, and the worker also runs `prepare`, reading
  * included files through a FileReader that stays on this side.
+ *
+ * The library's two-phase reply becomes an interim `parsed` message: the worker posts a render's
+ * BOM rows and notes before layout, and the host joins them to its own `timeout` and to a
+ * `failure` that lacks them, as the library's host reads them from the tail of its buffer.
  */
 
 /** What the host needs from a worker; a browser `Worker` satisfies it, and so does the test adapter. */
@@ -77,6 +81,8 @@ interface Engine {
   abandon(): void;
   pending: Map<number, (answer: Answer | undefined) => void>;
   readers: Map<number, FileReader>;
+  /** Parsed stages of the requests still pending, by request id. */
+  parsed: Map<number, Stage>;
 }
 
 const STOPPED = { status: 'unavailable', reason: 'the renderer was stopped' } as const;
@@ -123,7 +129,9 @@ export function createHost(spawnWorker: () => WorkerLike, options: HostOptions =
   const spawn = (): Engine => {
     const worker = spawnWorker();
     const pending = new Map<number, (answer: Answer | undefined) => void>();
-    const engine: Engine = { worker, started: Promise.resolve({ type: 'started' }), abandon: () => {}, pending, readers: new Map() };
+    const engine: Engine = {
+      worker, started: Promise.resolve({ type: 'started' }), abandon: () => {}, pending, readers: new Map(), parsed: new Map()
+    };
     engine.started = new Promise<Started>((resolve) => {
       engine.abandon = () => {
         window.clearTimeout(timer);
@@ -140,6 +148,11 @@ export function createHost(spawnWorker: () => WorkerLike, options: HostOptions =
         }
         if (data.type === 'read') {
           serve(engine, data);
+          return;
+        }
+        if (data.type === 'parsed') {
+          // Kept only for a job still waiting; a late one for an abandoned job is dropped.
+          if (pending.has(data.id)) engine.parsed.set(data.id, { bom: data.bom, notes: data.notes });
           return;
         }
         window.clearTimeout(timer);
@@ -160,10 +173,11 @@ export function createHost(spawnWorker: () => WorkerLike, options: HostOptions =
     for (const settle of engine.pending.values()) settle(undefined);
     engine.pending.clear();
     engine.readers.clear();
+    engine.parsed.clear();
     if (current === engine) current = undefined;
   };
 
-  type Outcome<T> = { engine: Engine; answer: T } | Exclude<RenderResult, { status: 'success' | 'failure' }>;
+  type Outcome<T> = { engine: Engine; answer: T; parsed?: Stage } | Exclude<RenderResult, { status: 'success' | 'failure' }>;
 
   /** Send one request to a started engine and wait for its answer, at most `budget` ms. */
   const exchange = async <T extends Answer>(
@@ -194,12 +208,14 @@ export function createHost(spawnWorker: () => WorkerLike, options: HostOptions =
       send(engine, id);
     });
     engine.readers.delete(id);
+    const parsed = engine.parsed.get(id);
+    engine.parsed.delete(id);
     if (timedOut) {
       stop(engine);
-      return { status: 'timeout', budget };
+      return { status: 'timeout', budget, ...parsed };
     }
     if (!answer) return STOPPED;
-    return { engine, answer: answer as T };
+    return { engine, answer: answer as T, ...(parsed && { parsed }) };
   };
 
   const enqueue = <T>(job: () => Promise<T>): Promise<T> => {
@@ -244,7 +260,10 @@ export function createHost(spawnWorker: () => WorkerLike, options: HostOptions =
         });
         if (!('answer' in outcome)) return outcome;
         if (outcome.answer.discard) stop(outcome.engine);
-        return outcome.answer.result;
+        const { result } = outcome.answer;
+        // The worker puts the stage in a failure after it; the join is belt and braces.
+        if (result.status === 'failure' && !result.bom && outcome.parsed) return { ...result, ...outcome.parsed };
+        return result;
       });
     },
     dispose() {

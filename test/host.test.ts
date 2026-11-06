@@ -5,9 +5,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { FileReader, Prepared, RenderResult } from '@reonarudo/spice-renderer';
 import { createHost, type WorkerLike } from '../src/host';
-import type { FileAnswer, Request, WorkerMessage } from '../src/protocol';
+import type { FileAnswer, ParsedStage as Stage, Request, WorkerMessage } from '../src/protocol';
 
-type Answer = { result: RenderResult; discard?: true } | 'hang';
+/** A reply, optionally after a parsed stage; or a stage and then nothing, as a worker stuck in layout. */
+type Answer = { result: RenderResult; discard?: true; parsed?: Stage } | 'hang' | { hang: true; parsed: Stage };
 interface Script {
   start?: 'ok' | 'fail' | 'silent';
   answer?: (source: string) => Answer;
@@ -53,9 +54,12 @@ function workers(script: Script = {}) {
           })();
           return;
         }
-        const answer = (script.answer ?? ((source) => ({ result: { status: 'success', output: `<svg>${source}</svg>`, notes: [] } })))(request.source);
+        const answer: Answer = (script.answer ?? ((source) => ({ result: { status: 'success', output: `<svg>${source}</svg>`, bom: [], notes: [] } })))(request.source);
         if (answer === 'hang') return;
-        later({ type: 'reply', id: request.id, ...answer });
+        if (answer.parsed) later({ type: 'parsed', id: request.id, ...answer.parsed });
+        if ('hang' in answer) return;
+        const { parsed: _, ...reply } = answer;
+        later({ type: 'reply', id: request.id, ...reply });
       },
       terminate() { record.terminated = true; }
     };
@@ -75,7 +79,7 @@ test('renders through the worker, starting one engine eagerly', async () => {
   const { spawn, spawned } = workers();
   const host = createHost(spawn);
   assert.equal(spawned.length, 1);
-  assert.deepEqual(await host.render(prepared('R1 a 0 1')), { status: 'success', output: '<svg>R1 a 0 1</svg>', notes: [] });
+  assert.deepEqual(await host.render(prepared('R1 a 0 1')), { status: 'success', output: '<svg>R1 a 0 1</svg>', bom: [], notes: [] });
   const request = spawned[0]!.requests[0]!;
   assert.equal(request.type === 'render' && request.outputBytes, 4 * 1024 * 1024);
   host.dispose();
@@ -125,7 +129,7 @@ test('renders run one at a time, in order', async () => {
       active++;
       most = Math.max(most, active);
       setTimeout(() => { active--; }, 1);
-      return { result: { status: 'success', output: source, notes: [] } };
+      return { result: { status: 'success', output: source, bom: [], notes: [] } };
     }
   });
   const host = createHost(spawn);
@@ -137,7 +141,7 @@ test('renders run one at a time, in order', async () => {
 });
 
 test('a render past the budget times out, stops the worker, and the next render starts a fresh one', async () => {
-  const { spawn, spawned } = workers({ answer: (source) => source === 'slow' ? 'hang' : { result: { status: 'success', output: 'ok', notes: [] } } });
+  const { spawn, spawned } = workers({ answer: (source) => source === 'slow' ? 'hang' : { result: { status: 'success', output: 'ok', bom: [], notes: [] } } });
   const host = createHost(spawn, { timeout: 200 });
   assert.deepEqual(await host.render(prepared('slow')), { status: 'timeout', budget: 200 });
   assert.equal(spawned[0]!.terminated, true);
@@ -149,7 +153,7 @@ test('a render past the budget times out, stops the worker, and the next render 
 test('a reply marked discard is returned, and its engine is not used again', async () => {
   const { spawn, spawned } = workers({ answer: (source) => source === 'boom'
     ? { result: { status: 'failure', message: 'the SPICE renderer stopped unexpectedly' }, discard: true }
-    : { result: { status: 'success', output: 'ok', notes: [] } } });
+    : { result: { status: 'success', output: 'ok', bom: [], notes: [] } } });
   const host = createHost(spawn);
   assert.deepEqual(await host.render(prepared('boom')), { status: 'failure', message: 'the SPICE renderer stopped unexpectedly' });
   assert.equal(spawned[0]!.terminated, true);
@@ -215,4 +219,62 @@ test('options are validated as the library validates them', () => {
   for (const options of [{ timeout: 0 }, { timeout: Number.NaN }, { startupTimeout: -1 }, { prepareTimeout: 0 }, { limits: { sourceChars: Infinity } }, { limits: { outputBytes: 0 } }]) {
     assert.throws(() => createHost(spawn, options), TypeError, JSON.stringify(options));
   }
+});
+
+const STAGE: Stage = {
+  bom: [{ type: 'diode', name: 'diode', value: '1N4007', references: [{ ref: 'D1', line: 1 }, { ref: 'D2', line: 2 }] }],
+  notes: ['Line 1: model 1N4007 of D1 is not defined here; drawn as a diode.']
+};
+
+test('a parsed stage is joined to the timeout of a render the worker did not finish', async () => {
+  const { spawn, spawned } = workers({ answer: () => ({ hang: true, parsed: STAGE }) });
+  const host = createHost(spawn, { timeout: 50 });
+  assert.deepEqual(await host.render(prepared('slow')), { status: 'timeout', budget: 50, ...STAGE });
+  assert.equal(spawned[0]!.terminated, true);
+  host.dispose();
+});
+
+test('a timeout before the netlist was read carries no stage', async () => {
+  const { spawn } = workers({ answer: () => 'hang' });
+  const host = createHost(spawn, { timeout: 50 });
+  assert.deepEqual(await host.render(prepared('slow')), { status: 'timeout', budget: 50 });
+  host.dispose();
+});
+
+test('a parsed stage is joined to a failure without one, never over a failure that has its own', async () => {
+  const own: Stage = { bom: [], notes: ['own'] };
+  const { spawn } = workers({ answer: (source) => source === 'bare'
+    ? { result: { status: 'failure', message: 'The schematic could not be laid out (x).' }, parsed: STAGE }
+    : { result: { status: 'failure', message: 'The schematic could not be laid out (y).', ...own }, parsed: STAGE } });
+  const host = createHost(spawn);
+  assert.deepEqual(await host.render(prepared('bare')), { status: 'failure', message: 'The schematic could not be laid out (x).', ...STAGE });
+  assert.deepEqual(await host.render(prepared('own')), { status: 'failure', message: 'The schematic could not be laid out (y).', ...own });
+  host.dispose();
+});
+
+test('a discarded failure carries the stage only when one arrived; a parse failure and a stop never do', async () => {
+  const stopped = { status: 'failure', message: 'the SPICE renderer stopped unexpectedly' } as const;
+  const { spawn } = workers({ answer: (source) => source === 'late'
+    ? { result: stopped, discard: true, parsed: STAGE }
+    : source === 'early' ? { result: stopped, discard: true }
+    : source === 'parse' ? { result: { status: 'failure', message: 'D1 needs 2 nodes; found 1.', line: 1 } }
+    : { hang: true, parsed: STAGE } });
+  const host = createHost(spawn, { timeout: 60000 });
+  assert.deepEqual(await host.render(prepared('late')), { ...stopped, ...STAGE });
+  assert.deepEqual(await host.render(prepared('early')), stopped);
+  assert.deepEqual(await host.render(prepared('parse')), { status: 'failure', message: 'D1 needs 2 nodes; found 1.', line: 1 });
+  const pending = host.render(prepared('hang'));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  host.dispose();
+  assert.deepEqual(await pending, { status: 'unavailable', reason: 'the renderer was stopped' });
+});
+
+test('a stage belongs to its own request: the next render on the same worker does not inherit it', async () => {
+  const { spawn } = workers({ answer: (source) => source === 'first'
+    ? { result: { status: 'success', output: 'ok', ...STAGE }, parsed: STAGE }
+    : { result: { status: 'failure', message: 'bad', line: 1 } } });
+  const host = createHost(spawn);
+  assert.equal((await host.render(prepared('first'))).status, 'success');
+  assert.deepEqual(await host.render(prepared('second')), { status: 'failure', message: 'bad', line: 1 });
+  host.dispose();
 });

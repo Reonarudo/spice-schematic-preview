@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- **The BOM view.** In Reading view a second button beside **</>** shows a block's parts as a
+  table: quantity, references, type, value, and the included file when the block includes files.
+  Identical parts share a row. The rows come from spice-renderer 1.1.0. A timed-out or
+  unlaid-out schematic keeps its table; a netlist with a mistake says it has no parts.
+- **BOM table style** setting: Plain (the default), Compact or Card. A change restyles every
+  table at once, without a redraw; Card follows **Follow dark themes**.
+- A BOM view is remembered like a netlist view, and **Show every schematic in this note**
+  switches both back. Netlist views saved by 0.1 still open as netlist views; the data file
+  gains a `view` on each entry the first time it is saved.
+- Live Preview ignores a saved BOM view, as it ignores a saved netlist view: blocks always show
+  their schematic there.
+- The netlist reader's notes are logged (with **Debug logging**) for timed-out schematics too.
+- The two buttons need more room in a block's corner: a schematic and a source view keep 68 and
+  76 pixels clear at the inline end, up from 36 and 44.
+
 ## 0.1.4 (2026-11-01)
 
 - Included files (`.include`, `.inc`, `.lib`) are read through Obsidian's vault API instead of

@@ -1,9 +1,10 @@
 // The live run: a real Obsidian, launched with a throwaway profile and a throwaway vault holding
-// the built plugin, examples/view-toggle.md and the model file it includes, driven over the
-// Chrome DevTools Protocol. Covers what the unit tests cannot: the processor in Reading view and
-// Live Preview, attributes recovered from the note, the worker inside Obsidian, included files
-// read from the vault and redrawn when they change, and the toggle's persistence across
-// re-render, reopen and plugin reload.
+// the built plugin, examples/view-toggle.md and examples/bom-view.md with the files they include,
+// driven over the Chrome DevTools Protocol. Covers what the unit tests cannot: the processor in
+// Reading view and Live Preview, attributes recovered from the note, the worker inside Obsidian,
+// included files read from the vault and redrawn when they change, the toggle's and the BOM
+// view's persistence across re-render, reopen and plugin reload, a 0.1 data file read as source
+// flips, the BOM table style as a body class, and the card's contrast in light and dark.
 //
 // Usage: npm run build && npm run test:live
 // Set OBSIDIAN_EXECUTABLE to use an Obsidian other than /Applications/Obsidian.app.
@@ -33,6 +34,18 @@ const FIXTURE = {
   /** Position of the block with its own dialect. */
   dialect: 10
 };
+/** The BOM view's note (spice-markdown-preview's docs/bom-view-spec.md, section 11.6). */
+const BOM = {
+  file: 'examples/bom-view.md',
+  note: 'bom-view.md',
+  includes: ['examples/included/stage.cir'],
+  fences: 10,
+  bridge: 0,
+  includer: 3,
+  wide: 4,
+  broken: 5,
+  twins: [7, 8]
+};
 const EXECUTABLE = process.env.OBSIDIAN_EXECUTABLE ?? '/Applications/Obsidian.app/Contents/MacOS/Obsidian';
 
 const manifest = JSON.parse(await readFile('manifest.json', 'utf8'));
@@ -45,6 +58,23 @@ await mkdir(shots);
 for (const file of ['main.js', 'manifest.json', 'styles.css']) await cp(file, join(pluginDir, file));
 await cp(FIXTURE.file, join(vault, 'view-toggle.md'));
 for (const file of FIXTURE.includes) await cp(file, join(vault, file.slice('examples/'.length)), { recursive: true });
+await cp(BOM.file, join(vault, BOM.note));
+for (const file of BOM.includes) await cp(file, join(vault, file.slice('examples/'.length)), { recursive: true });
+
+/** The fence key: FNV-1a, 32-bit, of the exact body, as src/fence.ts computes it. */
+const fenceKey = (body) => {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < body.length; i++) {
+    hash ^= body.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+};
+// A data file as 0.1 wrote it, before the vault opens: the BOM note's first block flipped to
+// source, with no view in its entry.
+const firstBomBody = /```spice\n([\s\S]*?)\n```/.exec(await readFile(BOM.file, 'utf8'))[1];
+const SEEDED = { key: fenceKey(firstBomBody), ordinal: 0, index: 0 };
+await writeFile(join(pluginDir, 'data.json'), JSON.stringify({ toggles: { [BOM.note]: [SEEDED] } }));
 await writeFile(join(vault, 'other.md'), '# Another note\n');
 // A real file just above the vault, which notes/relative-includes.md names and must not read.
 await writeFile(join(root, 'outside.inc'), '.subckt opamp a b c\n.ends\n');
@@ -88,8 +118,21 @@ const state = (scope) => page.evaluate(({ base, scope }) => {
     : app.workspace.activeLeaf.view.containerEl.querySelector('.markdown-reading-view');
   return [...container.querySelectorAll(`.${base}-fence`)].map((fence) => {
     const slot = fence.querySelector(`.${base}-rendering`);
+    const bom = fence.querySelector(`:scope > .${base}-bom`);
+    const shown = (element) => !!element && getComputedStyle(element).display !== 'none';
     return {
       view: fence.getAttribute('data-view') ?? 'rendering',
+      // The <pre> by its tag: Obsidian adds a class of its own to it.
+      children: [...fence.children].map((child) => child.tagName === 'PRE' ? 'pre' : child.classList[0] ?? child.tagName.toLowerCase()),
+      pressed: [...fence.querySelectorAll(':scope > button')].map((button) => button.getAttribute('aria-pressed')),
+      bomGlyph: [...fence.querySelectorAll(`:scope > .${base}-bom-button svg`)].find(shown)?.classList[2] ?? null,
+      bomHolds: !bom ? 'none' : bom.querySelector(`.${base}-bom-table`) ? 'table'
+        : bom.querySelector(`.${base}-bom-empty[role="status"]`) ? 'loading'
+        : bom.querySelector(`.${base}-bom-empty`) ? 'sentence' : 'empty',
+      bomText: bom?.querySelector(`.${base}-bom-empty`)?.textContent ?? null,
+      header: [...(bom?.querySelectorAll('thead th') ?? [])].map((cell) => cell.textContent),
+      rows: [...(bom?.querySelectorAll('tbody tr') ?? [])].map((row) => [...row.children].map((cell) => cell.textContent)),
+      bomShown: shown(bom),
       key: fence.getAttribute('data-fence-key'),
       holds: slot.querySelector(':scope > svg, :scope > figure, :scope > div[role="img"]') ? 'diagram'
         : slot.querySelector(`.${base}-error`) ? 'error'
@@ -106,7 +149,11 @@ const state = (scope) => page.evaluate(({ base, scope }) => {
   });
 }, { base: BASE, scope });
 
-/** Reading view renders sections lazily; scroll through so every block is drawn, and wait until none is loading. */
+/**
+ * Reading view renders sections lazily; scroll through so every block is drawn, and wait until
+ * none is loading, in either slot: a block is drawn with a placeholder first and filled later, and
+ * a check that ran between the two would read a half-filled note.
+ */
 async function settle(scope, count = FIXTURE.fences) {
   for (let i = 0; i < 80; i++) {
     await page.evaluate((scope) => {
@@ -118,7 +165,8 @@ async function settle(scope, count = FIXTURE.fences) {
     }, scope);
     await sleep(100);
     const fences = await state(scope);
-    if (fences.length === count && fences.every((fence) => fence.holds !== 'loading' && fence.holds !== 'empty')) {
+    if (fences.length === count && fences.every((fence) => fence.holds !== 'loading' && fence.holds !== 'empty' &&
+      fence.bomHolds !== 'loading' && fence.bomHolds !== 'empty')) {
       return fences;
     }
   }
@@ -126,18 +174,19 @@ async function settle(scope, count = FIXTURE.fences) {
   throw new Error(`${scope}: expected ${count} settled blocks, have ${JSON.stringify(last.map((fence) => fence.holds))}`);
 }
 
-const click = (scope, position) => page.evaluate(({ base, scope, position }) => {
+/** Click a block's view toggle, or (`which` = 'bom-button') its BOM button, where a reader would. */
+const click = (scope, position, which = 'toggle') => page.evaluate(({ base, scope, position, which }) => {
   const selector = scope === 'live' ? '.markdown-source-view' : '.markdown-reading-view';
   const container = app.workspace.activeLeaf.view.containerEl.querySelector(selector);
-  const button = container.querySelectorAll(`.${base}-fence > .${base}-toggle`)[position];
+  const button = container.querySelectorAll(`.${base}-fence > .${base}-${which}`)[position];
   button.scrollIntoView({ block: 'center' });
   const rect = button.getBoundingClientRect();
   const x = rect.x + rect.width / 2;
   const y = rect.y + rect.height / 2;
   const hit = document.elementFromPoint(x, y);
   return { x, y, hit: hit === button || button.contains(hit) ? null : `${hit?.tagName}.${hit?.className}` };
-}, { base: BASE, scope, position }).then(async ({ x, y, hit }) => {
-  if (hit) throw new Error(`block ${position}'s toggle is covered by ${hit}`);
+}, { base: BASE, scope, position, which }).then(async ({ x, y, hit }) => {
+  if (hit) throw new Error(`block ${position}'s ${which} is covered by ${hit}`);
   await page.mouse.click(x, y);
   await sleep(50);
 });
@@ -150,11 +199,15 @@ const setMode = (mode) => page.evaluate(async (mode) => {
   await leaf.setViewState(viewState);
 }, mode);
 
-const storedToggles = async () => {
+const storedToggles = async (note = 'view-toggle.md') => {
   await sleep(400);
   const data = JSON.parse(await readFile(join(pluginDir, 'data.json'), 'utf8').catch(() => '{}'));
-  return data.toggles?.['view-toggle.md'] ?? null;
+  return data.toggles?.[note] ?? null;
 };
+
+const open = (note) => page.evaluate(async (note) => {
+  await app.workspace.getLeaf(false).openFile(app.vault.getAbstractFileByPath(note), { state: { mode: 'preview' } });
+}, note);
 
 const views = (fences) => fences.map((fence, index) => fence.view === 'source' ? index : -1).filter((index) => index >= 0);
 
@@ -389,7 +442,7 @@ try {
     await click('reading', FIXTURE.broken);
     await click('reading', FIXTURE.broken);
     assert.deepEqual(views(await state('reading')), [second]);
-    assert.deepEqual(await storedToggles(), [{ key: fences[second].key, ordinal: 1, index: second }]);
+    assert.deepEqual(await storedToggles(), [{ key: fences[second].key, ordinal: 1, index: second, view: 'source' }]);
   });
 
   await page.screenshot({ path: join(shots, 'reading-flipped.png') });
@@ -627,6 +680,256 @@ try {
     assert.ok(printed.every((block) => block.button === null || block.button === '0'), 'no button on paper');
   });
 
+  // ---- The BOM view (spice-markdown-preview's docs/bom-view-spec.md, sections 11.4 and 11.5). ----
+  await page.evaluate(() => app.changeTheme('obsidian'));
+  await open(BOM.note);
+  let bom = await settle('reading', BOM.fences);
+  const bomViews = (fences) => fences.map((fence) => fence.view);
+  const rendered = Array(BOM.fences).fill('rendering');
+  const expect = (changes) => rendered.map((view, index) => changes[index] ?? view);
+
+  await check('a 0.1 data file opens its flip in source view, and the first save rewrites it with a view', async () => {
+    assert.deepEqual(bomViews(bom), expect({ 0: 'source' }));
+    assert.equal(bom[0].key, SEEDED.key);
+    assert.deepEqual(await storedToggles(BOM.note), [SEEDED], 'not rewritten until a save');
+    await click('reading', BOM.includer, 'bom-button');
+    assert.deepEqual(await storedToggles(BOM.note), [{ ...SEEDED, view: 'source' }, { key: bom[BOM.includer].key, ordinal: 0, index: BOM.includer, view: 'bom' }]);
+    await click('reading', BOM.includer, 'bom-button');
+    await click('reading', 0);
+    assert.equal(await storedToggles(BOM.note), null);
+  });
+
+  bom = await state('reading');
+  await check('every block has the BOM button, then the toggle, unpressed, over its rendering; the json fence has neither', async () => {
+    bom.forEach((fence, index) => {
+      assert.deepEqual(fence.children, [`${BASE}-bom-button`, `${BASE}-toggle`, `${BASE}-rendering`, `${BASE}-bom`, 'pre'], `block ${index}`);
+      assert.deepEqual(fence.pressed, ['false', 'false'], `block ${index}`);
+      assert.deepEqual([fence.renderingShown, fence.bomShown, fence.sourceShown], [true, false, false], `block ${index}`);
+      assert.equal(fence.bomGlyph, `${BASE}-icon-list`);
+    });
+    const counts = await page.evaluate((base) => ({
+      json: [...document.querySelectorAll('.markdown-reading-view pre > code.language-json')].filter((code) => !code.closest(`.${base}-fence`)).length,
+      buttons: document.querySelectorAll(`.markdown-reading-view .${base}-bom-button`).length
+    }), BASE);
+    assert.deepEqual(counts, { json: 1, buttons: BOM.fences });
+  });
+
+  await check('the BOM button sits beside the toggle in the corner, uncovered, both appearing on hover', async () => {
+    const corner = await page.evaluate(({ base, position }) => {
+      const fence = document.querySelectorAll(`.markdown-reading-view .${base}-fence`)[position];
+      fence.scrollIntoView({ block: 'center' });
+      const f = fence.getBoundingClientRect();
+      const inset = (button) => {
+        const b = button.getBoundingClientRect();
+        return [Math.round(f.right - b.right), Math.round(b.top - f.top), Math.round(b.width), Math.round(b.height)];
+      };
+      return { bom: inset(fence.querySelector(`.${base}-bom-button`)), toggle: inset(fence.querySelector(`.${base}-toggle`)),
+        opacity: getComputedStyle(fence.querySelector(`.${base}-bom-button`)).opacity, label: fence.querySelector(`.${base}-bom-button`).getAttribute('aria-label') };
+    }, { base: BASE, position: BOM.bridge });
+    assert.deepEqual(corner.toggle, [4, 4, 28, 24]);
+    assert.deepEqual(corner.bom, [36, 4, 28, 24]);
+    assert.equal(corner.label, 'BOM view');
+    await page.mouse.move(1, 1);
+    await sleep(200);
+    assert.equal(await page.evaluate((base) => getComputedStyle(document.querySelector(`.markdown-reading-view .${base}-bom-button`)).opacity, BASE), '0');
+  });
+
+  await check('the BOM button shows the BOM view and presses itself; a second click goes back to the rendering', async () => {
+    await click('reading', BOM.bridge, 'bom-button');
+    let now = (await state('reading'))[BOM.bridge];
+    assert.equal(now.view, 'bom');
+    assert.deepEqual(now.pressed, ['true', 'false']);
+    assert.deepEqual([now.renderingShown, now.bomShown, now.sourceShown], [false, true, false]);
+    assert.equal(now.bomGlyph, `${BASE}-icon-graph`);
+    await page.screenshot({ path: join(shots, 'bom-dark-plain.png') });
+    await click('reading', BOM.bridge, 'bom-button');
+    now = (await state('reading'))[BOM.bridge];
+    assert.equal(now.view, 'rendering');
+    assert.deepEqual([now.renderingShown, now.bomShown, now.sourceShown], [true, false, false]);
+  });
+
+  await check('from BOM view the toggle goes to source; from source view the BOM button goes to BOM', async () => {
+    await click('reading', BOM.bridge, 'bom-button');
+    await click('reading', BOM.bridge);
+    let now = (await state('reading'))[BOM.bridge];
+    assert.equal(now.view, 'source');
+    assert.deepEqual(now.pressed, ['false', 'true']);
+    assert.deepEqual([now.renderingShown, now.bomShown, now.sourceShown], [false, false, true]);
+    await click('reading', BOM.bridge, 'bom-button');
+    now = (await state('reading'))[BOM.bridge];
+    assert.equal(now.view, 'bom');
+    assert.deepEqual(now.pressed, ['true', 'false']);
+    await click('reading', BOM.bridge, 'bom-button');
+    assert.equal((await state('reading'))[BOM.bridge].view, 'rendering');
+    assert.equal(await storedToggles(BOM.note), null);
+  });
+
+  await check('the tables: four diodes in one row, the included file named, no parts for a netlist that does not read', async () => {
+    const [bridge, includer, broken] = [bom[BOM.bridge], bom[BOM.includer], bom[BOM.broken]];
+    assert.deepEqual(bridge.header, ['Qty', 'References', 'Type', 'Value']);
+    assert.equal(bridge.rows.length, 4);
+    assert.deepEqual(bridge.rows[1], ['4', 'D1, D2, D3, D4', 'diode', '1N4007']);
+    assert.deepEqual(includer.header, ['Qty', 'References', 'Type', 'Value', 'File']);
+    assert.deepEqual(includer.rows, [
+      ['1', 'R7', 'resistor', '4k7', 'included/stage.cir'],
+      ['1', 'X1', 'subcircuit', 'LM358', ''],
+      ['1', 'R1', 'resistor', '1k m=2', ''],
+      ['1', 'R2', 'resistor', '1k', '']
+    ]);
+    assert.equal(broken.holds, 'error');
+    assert.equal(broken.bomHolds, 'sentence');
+    assert.equal(broken.bomText, 'The netlist did not read, so there are no parts.');
+    assert.deepEqual(bom[BOM.wide].rows.map((row) => row[0]), ['1', '16']);
+  });
+
+  const [bomTwin, sourceTwin] = BOM.twins;
+  await check('two identical bodies keep their own views, through an edit above them', async () => {
+    await click('reading', bomTwin, 'bom-button');
+    await click('reading', sourceTwin);
+    assert.deepEqual(bomViews(await state('reading')), expect({ [bomTwin]: 'bom', [sourceTwin]: 'source' }));
+    await page.evaluate(async (note) => {
+      const file = app.vault.getAbstractFileByPath(note);
+      await app.vault.process(file, (text) => text.replace('## 8. Two identical bodies', '## 8. Two identical bodies, edited'));
+    }, BOM.note);
+    await sleep(800);
+    bom = await settle('reading', BOM.fences);
+    assert.deepEqual(bomViews(bom), expect({ [bomTwin]: 'bom', [sourceTwin]: 'source' }));
+    assert.deepEqual(bom[bomTwin].pressed, ['true', 'false']);
+    assert.deepEqual(bom[sourceTwin].pressed, ['false', 'true']);
+  });
+
+  await check('a BOM view survives a re-render, closing and reopening the note, and reloading the plugin', async () => {
+    const kept = expect({ [bomTwin]: 'bom', [sourceTwin]: 'source' });
+    await page.evaluate(() => app.workspace.activeLeaf.view.previewMode.rerender(true));
+    assert.deepEqual(bomViews(await settle('reading', BOM.fences)), kept);
+    await open('other.md');
+    await open(BOM.note);
+    assert.deepEqual(bomViews(await settle('reading', BOM.fences)), kept);
+    await page.evaluate(async (id) => {
+      await app.plugins.disablePlugin(id);
+      await app.plugins.enablePlugin(id);
+    }, manifest.id);
+    await page.evaluate(() => app.workspace.activeLeaf.view.previewMode.rerender(true));
+    assert.deepEqual(bomViews(await settle('reading', BOM.fences)), kept);
+  });
+
+  await check('in Live Preview the BOM button is hidden, and a block left in BOM view shows its schematic', async () => {
+    await setMode('live');
+    // Live Preview keeps only the blocks near the viewport: scrolled to the end, the twins are among them.
+    let live = [];
+    for (let i = 0; i < 80; i++) {
+      await page.evaluate(() => {
+        const scroller = app.workspace.activeLeaf.view.containerEl.querySelector('.cm-scroller');
+        scroller.scrollTop = scroller.scrollHeight;
+      });
+      await sleep(100);
+      live = await state('live');
+      if (live.some((fence) => fence.view === 'bom') && live.every((fence) => fence.holds !== 'loading' && fence.holds !== 'empty')) break;
+    }
+    assert.ok(live.some((fence) => fence.view === 'bom'), `the twin left in BOM view is drawn: ${JSON.stringify(live.map((fence) => fence.view))}`);
+    live.forEach((fence, index) => {
+      assert.deepEqual([fence.renderingShown, fence.bomShown, fence.sourceShown], [true, false, false], `block ${index} (${fence.view})`);
+    });
+    const hidden = await page.evaluate((base) => [...document.querySelectorAll(`.markdown-source-view .${base}-bom-button`)]
+      .every((button) => getComputedStyle(button).display === 'none'), BASE);
+    assert.equal(hidden, true);
+    await setMode('reading');
+    assert.deepEqual(bomViews(await settle('reading', BOM.fences)), expect({ [bomTwin]: 'bom', [sourceTwin]: 'source' }));
+  });
+
+  /** What the BOM slot of the block in BOM view looks like: the slot's background, a cell's colour, the summary. */
+  const bomLook = () => page.evaluate(({ base, position }) => {
+    const fence = document.querySelectorAll(`.markdown-reading-view .${base}-fence`)[position];
+    const slot = fence.querySelector(`.${base}-bom`);
+    const table = slot.querySelector('table');
+    const cell = slot.querySelector('tbody td.spice-bom-refs');
+    const summary = slot.querySelector(`.${base}-bom-summary`);
+    // What the table is drawn over: the first ancestor with a background of its own.
+    let ground = slot.parentElement;
+    while (ground && ['rgba(0, 0, 0, 0)', 'transparent'].includes(getComputedStyle(ground).backgroundColor)) ground = ground.parentElement;
+    const page = ground ? getComputedStyle(ground).backgroundColor : 'rgb(255, 255, 255)';
+    return {
+      body: [...document.body.classList].filter((name) => name.startsWith(`${base}-bom-`)),
+      slot: [...slot.classList], background: getComputedStyle(slot).backgroundColor, page,
+      text: getComputedStyle(cell).color, header: getComputedStyle(slot.querySelector('th')).color,
+      summary: getComputedStyle(summary).display, width: Math.round(table.getBoundingClientRect().width), slotWidth: Math.round(slot.getBoundingClientRect().width),
+      mark: table.getAttribute('data-live-mark')
+    };
+  }, { base: BASE, position: bomTwin });
+  const channels = (css) => (css.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+  const luminance = (css) => {
+    const [r, g, b] = channels(css).map((c) => { const v = c / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (x, y) => { const [a, b] = [luminance(x), luminance(y)].sort((p, q) => q - p); return (a + 0.05) / (b + 0.05); };
+  const transparent = (css) => css === 'rgba(0, 0, 0, 0)' || css === 'transparent';
+  const style = (bomStyle) => page.evaluate(({ id, bomStyle }) => app.plugins.plugins[id].updateSettings({ bomStyle }), { id: manifest.id, bomStyle });
+
+  await check('the BOM table style is a body class: a change restyles the table in place, without a redraw', async () => {
+    await page.evaluate(({ base, position }) => document.querySelectorAll(`.markdown-reading-view .${base}-fence`)[position]
+      .querySelector(`.${base}-bom table`).setAttribute('data-live-mark', 'kept'), { base: BASE, position: bomTwin });
+    const plain = await bomLook();
+    assert.deepEqual(plain.body, [`${BASE}-bom-plain`]);
+    assert.deepEqual(plain.slot, [`${BASE}-bom`], 'the slot carries no style class in the plugin');
+    assert.equal(plain.summary, 'none');
+    await style('compact');
+    const compact = await bomLook();
+    assert.deepEqual(compact.body, [`${BASE}-bom-compact`]);
+    assert.equal(compact.mark, 'kept', 'the same table, restyled');
+    assert.equal(compact.width, compact.slotWidth, 'compact is full width');
+    assert.equal(compact.summary, 'none');
+    await page.screenshot({ path: join(shots, 'bom-dark-compact.png') });
+    await style('card');
+    const card = await bomLook();
+    assert.deepEqual(card.body, [`${BASE}-bom-card`]);
+    assert.equal(card.mark, 'kept');
+    assert.equal(card.summary, 'block');
+  });
+
+  await check('the card is readable: white in light or with Follow dark themes off, the theme\'s own in dark', async () => {
+    const follow = (followDarkTheme) => page.evaluate(({ id, followDarkTheme }) => app.plugins.plugins[id].updateSettings({ followDarkTheme }), { id: manifest.id, followDarkTheme });
+    const dark = await bomLook();
+    assert.notEqual(dark.background, 'rgb(255, 255, 255)', 'a dark card in a dark theme');
+    assert.ok(!transparent(dark.background));
+    assert.ok(contrast(dark.text, dark.background) >= 4.5, `text ${dark.text} on ${dark.background}`);
+    assert.ok(contrast(dark.header, dark.background) >= 4.5, `header ${dark.header} on ${dark.background}`);
+    await page.screenshot({ path: join(shots, 'bom-dark-card.png') });
+    await follow(false);
+    const off = await bomLook();
+    assert.deepEqual([off.background, off.text, off.header], ['rgb(255, 255, 255)', 'rgb(0, 0, 0)', 'rgb(0, 0, 0)']);
+    await page.screenshot({ path: join(shots, 'bom-dark-card-off.png') });
+    await follow(true);
+    await page.evaluate(() => app.changeTheme('moonstone'));
+    await sleep(300);
+    const light = await bomLook();
+    assert.deepEqual([light.background, light.text, light.header], ['rgb(255, 255, 255)', 'rgb(0, 0, 0)', 'rgb(0, 0, 0)']);
+    await page.screenshot({ path: join(shots, 'bom-light-card.png') });
+    for (const name of ['plain', 'compact']) {
+      await style(name);
+      const look = await bomLook();
+      const ground = transparent(look.background) ? look.page : look.background;
+      assert.ok(contrast(look.text, ground) >= 4.5, `${name} in light: ${look.text} on ${ground}`);
+      await page.screenshot({ path: join(shots, `bom-light-${name}.png`) });
+    }
+    await page.evaluate(() => app.changeTheme('obsidian'));
+    await sleep(300);
+    for (const name of ['plain', 'compact']) {
+      await style(name);
+      const look = await bomLook();
+      const ground = transparent(look.background) ? look.page : look.background;
+      assert.ok(contrast(look.text, ground) >= 4.5, `${name} in dark: ${look.text} on ${ground}`);
+    }
+    await page.evaluate(() => app.changeTheme('moonstone'));
+  });
+
+  await check('the command shows every schematic again, from BOM view and from source view', async () => {
+    await page.evaluate((id) => app.commands.executeCommandById(`${id}:reset-source-views`), manifest.id);
+    assert.deepEqual(bomViews(await state('reading')), rendered);
+    assert.equal(await storedToggles(BOM.note), null);
+    await open('view-toggle.md');
+    await settle('reading');
+  });
+
   await check('settings come from definitions, so Obsidian lists them, and a change keeps the saved flips', async () => {
     await click('reading', FIXTURE.broken);
     const shown = await page.evaluate(async (id) => {
@@ -642,10 +945,10 @@ try {
       app.setting.close();
       return { names, numberField, dialects, debug: app.plugins.plugins[id].settings.debug, defined: tab.getSettingDefinitions().map((item) => item.control?.key) };
     }, manifest.id);
-    assert.deepEqual(shown.names, ['Dialect', 'Layout timeout', 'Follow dark themes', 'Debug logging']);
+    assert.deepEqual(shown.names, ['Dialect', 'Layout timeout', 'Follow dark themes', 'BOM table style', 'Debug logging']);
     assert.equal(shown.numberField, true, 'drawn from the definitions: the layout timeout is a number field');
     assert.deepEqual(shown.dialects, ['ngspice', 'ltspice', 'pspice', 'hspice', 'xyce', 'spectre'], 'the dialect is a dropdown');
-    assert.deepEqual(shown.defined, ['dialect', 'layoutTimeout', 'followDarkTheme', 'debug']);
+    assert.deepEqual(shown.defined, ['dialect', 'layoutTimeout', 'followDarkTheme', 'bomStyle', 'debug']);
     assert.equal(shown.debug, true);
     const saved = await storedToggles();
     assert.equal(saved?.length, 1, 'the flip made before the change is still saved');

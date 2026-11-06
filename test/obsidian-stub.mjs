@@ -19,3 +19,11 @@ export class TFolder extends TAbstractFile {}
 export function normalizePath(path) {
   return path.replace(/[\\/]+/g, '/').replace(/^\/|\/$/g, '').replace(/[  ]/g, ' ').normalize('NFC') || '/';
 }
+
+// The settings tab's base class, so src/settings.ts loads; its definitions are tested without Obsidian drawing them.
+export class PluginSettingTab {
+  constructor(app, plugin) {
+    this.app = app;
+    this.plugin = plugin;
+  }
+}

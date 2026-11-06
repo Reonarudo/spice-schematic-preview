@@ -16,7 +16,8 @@ const MAX_RESULTS = 96;
  * too large to lay out would otherwise cost its whole budget on every pass. `unavailable` is not
  * kept, nor is a rejection: neither says anything about the netlist.
  *
- * `log` receives the netlist reader's notes, once per fresh render, labelled with the fence's first line.
+ * `log` receives the netlist reader's notes, once per fresh render, labelled with the fence's first
+ * line: from any result carrying them, a timeout or failure after the netlist was read included.
  */
 export function createResults(
   render: (prepared: Prepared) => Promise<RenderResult>,
@@ -38,7 +39,8 @@ export function createResults(
       entries.set(key, pending);
       if (entries.size > max) entries.delete(entries.keys().next().value!);
       pending.then((result) => {
-        if (result.status === 'success') for (const note of result.notes) log(`${label(prepared.source)}: ${note}`);
+        // A timeout or a layout failure keeps the notes of the netlist it read.
+        if (result.status !== 'unavailable') for (const note of result.notes ?? []) log(`${label(prepared.source)}: ${note}`);
         if (result.status === 'unavailable' && entries.get(key) === pending) entries.delete(key);
       }, () => {
         if (entries.get(key) === pending) entries.delete(key);
