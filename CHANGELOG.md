@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-11-06)
 
 - **The BOM view.** In Reading view a second button beside **</>** shows a block's parts as a
   table: quantity, references, type, value, and the included file when the block includes files.
